@@ -1,0 +1,1 @@
+export default function Loading() { return <main className="standalone" aria-label="Loading the design library" aria-busy="true"><span className="skeleton skeleton-title" /><span className="skeleton skeleton-line" /><div className="skeleton skeleton-panel" /></main>; }

@@ -1,0 +1,1 @@
+export { resolvePatientScope } from "./service";
