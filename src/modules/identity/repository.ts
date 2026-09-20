@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, isNull, or, gt, sql } from "drizzle-orm";
 import { getDb, type Transaction } from "@/platform/db";
-import { auditLog, careRelationships, users } from "./schema";
+import { auditLog, careRelationships, clinics, users } from "./schema";
 import type { Actor, AccessPurpose } from "./validators";
 
 export type AuditEvent = {
@@ -19,6 +19,19 @@ export async function findUserByEmail(email: string) {
 export async function findUserById(id: string, tx?: Transaction) {
   const [user] = await (tx ?? getDb()).select().from(users).where(eq(users.id, id)).limit(1);
   return user;
+}
+export async function createClinicOwner(input: { clinicName: string; displayName: string; email: string; passwordHash: string }) {
+  return getDb().transaction(async (tx) => {
+    const [clinic] = await tx.insert(clinics).values({ name: input.clinicName }).returning();
+    // Public registration always owns a NEW clinic. Never accept a clinic ID or role from the client.
+    const [user] = await tx.insert(users).values({ clinicId: clinic.id, displayName: input.displayName, email: input.email, passwordHash: input.passwordHash, role: "admin", patientId: null }).returning();
+    await appendAudit({ clinicId: clinic.id, actorId: user.id, action: "identity.workspace_created", purpose: "registration", outcome: "allowed", resourceId: clinic.id }, tx);
+    return user;
+  });
+}
+export async function findAccountSummary(actor: Actor) {
+  const [account] = await getDb().select({ displayName: users.displayName, clinicName: clinics.name }).from(users).innerJoin(clinics, eq(users.clinicId, clinics.id)).where(and(eq(users.id, actor.id), eq(clinics.id, actor.clinicId))).limit(1);
+  return account;
 }
 export async function hasCareRelationship(actor: Actor, patientId: string, purpose: AccessPurpose, tx?: Transaction) {
   const [relationship] = await (tx ?? getDb()).select({ id: careRelationships.id }).from(careRelationships).where(and(
