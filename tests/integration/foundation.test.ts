@@ -9,7 +9,7 @@ import { TOTP, Secret } from "otpauth";
 import { migrateDatabase } from "../../scripts/migrate";
 import { seedDatabase, seedId, seedIds } from "../../scripts/seed";
 import { assertCanAccessPatient, requestBreakGlass, AccessDeniedError } from "../../src/modules/identity/service";
-import { beginSignIn, finishSignIn } from "../../src/modules/identity/auth";
+import { beginSignIn, finishSignIn, registerWorkspace } from "../../src/modules/identity/auth";
 import { resolveSession, revokeSession } from "../../src/modules/identity/sessions";
 import { encryptSecret } from "../../src/modules/identity/crypto";
 import type { Actor, AccessPurpose } from "../../src/modules/identity/validators";
@@ -104,6 +104,36 @@ describe("database invariants as runtime user", () => {
 });
 
 describe("real Redis authentication", () => {
+  it("creates an isolated clinic, enrolls its owner, and consumes recovery codes once", async () => {
+    const input = { clinicName: "Integration clinic", displayName: "Synthetic Owner", email: "new-owner@example.test", password, confirmPassword: password, clinicId: seedIds.clinic, role: "clinician" };
+    const result = await registerWorkspace(input, "registration-test");
+    expect(result.kind).toBe("enroll_mfa");
+    if (result.kind !== "enroll_mfa") throw new Error("New owners must enroll MFA.");
+    const user = (await owner.query("SELECT * FROM users WHERE email = $1", [input.email])).rows[0];
+    expect(user.role).toBe("admin");
+    expect(user.clinic_id).not.toBe(seedIds.clinic);
+    expect(user.patient_id).toBeNull();
+    expect(await resolveSession(result.challenge)).toBeNull();
+    const secret = new URL(result.provisioningUri).searchParams.get("secret")!;
+    const code = new TOTP({ secret: Secret.fromBase32(secret), digits: 6, period: 30 }).generate();
+    const session = await finishSignIn({ challenge: result.challenge, code });
+    const signedIn = await resolveSession(session.token);
+    expect(signedIn?.mfaVerified).toBe(true);
+    expect(signedIn?.clinicId).toBe(user.clinic_id);
+    expect(session.recoveryCodes).toHaveLength(8);
+    await expect(assertCanAccessPatient(signedIn!, seedIds.firstPatient, "clinical.read")).rejects.toBeInstanceOf(AccessDeniedError);
+    await revokeSession(session.token);
+    const retry = await beginSignIn(input, "registration-test");
+    if (retry.kind !== "verify_mfa") throw new Error("Enrolled owners must verify MFA.");
+    const recovered = await finishSignIn({ challenge: retry.challenge, code: session.recoveryCodes![0] });
+    expect((await resolveSession(recovered.token))?.mfaVerifiedAt).toBeNull();
+    const repeated = await beginSignIn(input, "registration-test");
+    if (repeated.kind !== "verify_mfa") throw new Error("Expected verification.");
+    await expect(finishSignIn({ challenge: repeated.challenge, code: session.recoveryCodes![0] })).rejects.toThrow();
+    const clinicCount = (await owner.query("SELECT count(*)::int AS count FROM clinics")).rows[0].count;
+    await expect(registerWorkspace(input, "registration-test")).rejects.toThrow("couldn’t create");
+    expect((await owner.query("SELECT count(*)::int AS count FROM clinics")).rows[0].count).toBe(clinicCount);
+  });
   it("creates and revokes a patient session", async () => {
     const result = await beginSignIn({ email: "patient@example.test", password }, "127.0.0.1");
     expect(result.kind).toBe("session");

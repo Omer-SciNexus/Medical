@@ -9,6 +9,14 @@ export const actorSchema = z.object({
 });
 export type Actor = z.infer<typeof actorSchema>;
 export type AccessPurpose = z.infer<typeof purposeSchema>;
-export const loginSchema = z.object({ email: z.email().max(254).transform((v) => v.trim().toLowerCase()), password: z.string().min(1).max(256) });
+const emailSchema = z.string().trim().toLowerCase().pipe(z.email("Enter a valid email address.").max(254));
+export const loginSchema = z.object({ email: emailSchema, password: z.string().min(1, "Enter your password.").max(256) });
+export const registrationSchema = z.object({
+  displayName: z.string().trim().min(2, "Enter your full name.").max(100),
+  clinicName: z.string().trim().min(2, "Enter your clinic name.").max(120),
+  email: emailSchema,
+  password: z.string().min(15, "Use at least 15 characters for your password.").max(128, "Use no more than 128 characters."),
+  confirmPassword: z.string(),
+}).refine((data) => data.password === data.confirmPassword, { path: ["confirmPassword"], message: "Your passwords don’t match." });
 export const challengeSchema = z.object({ challenge: z.string().regex(/^[a-f0-9]{64}$/), code: z.string().regex(/^(\d{6}|[A-F0-9]{8}-[A-F0-9]{8})$/) });
 export const emergencySchema = z.object({ patientId: z.uuid(), reason: z.string().trim().min(20).max(1000) });
