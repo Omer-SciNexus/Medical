@@ -3,18 +3,19 @@ import { TOTP, Secret } from "otpauth";
 import { z } from "zod";
 import { getRedis } from "@/platform/redis";
 import { hashPassword, verifyPassword, digest, encryptSecret, decryptSecret, newToken, newRecoveryCodes } from "./crypto";
-import { findUserByEmail, findUserById, appendAudit, enrollMfa, consumeRecoveryCode } from "./repository";
+import { findUserByEmail, findUserById, appendAudit, enrollMfa, consumeRecoveryCode, createClinicOwner } from "./repository";
 import { createSession } from "./sessions";
-import { loginSchema, challengeSchema, type Actor } from "./validators";
+import { loginSchema, challengeSchema, registrationSchema, type Actor } from "./validators";
+import { AuthenticationError } from "./errors";
 
 const challengeData = z.object({ userId: z.uuid(), authenticatedAt: z.number(), secret: z.string().optional() });
-const authFailure = () => new Error("The sign-in details could not be verified. Check your details and try again.");
+const authFailure = () => new AuthenticationError("The sign-in details could not be verified. Check your details and try again.");
 let dummyHash: Promise<string> | undefined;
 
 async function throttle(scope: string, value: string, limit: number) {
   const key = `limit:${scope}:${digest(value)}`;
   const count = await getRedis().eval("local n = redis.call('INCR', KEYS[1]); if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end; return n", 1, key, 900);
-  if (Number(count) > limit) throw new Error("Too many sign-in attempts. Please wait 15 minutes before trying again.");
+  if (Number(count) > limit) throw new AuthenticationError("Too many attempts. Please wait 15 minutes before trying again.");
 }
 function actorFor(user: NonNullable<Awaited<ReturnType<typeof findUserById>>>, authenticatedAt: number, mfa: boolean, fresh: boolean): Actor {
   return { id: user.id, clinicId: user.clinicId, role: user.role, patientId: user.patientId, authenticatedAt, mfaVerified: mfa, mfaVerifiedAt: fresh ? Date.now() : null };
@@ -30,6 +31,24 @@ export async function beginSignIn(input: unknown, trustedClientAddress: string) 
     await appendAudit({ clinicId: null, actorId: null, action: "identity.sign_in_denied", purpose: "authentication", outcome: "denied" });
     throw authFailure();
   }
+  return beginChallenge(user);
+}
+export async function registerWorkspace(input: unknown, trustedClientAddress: string) {
+  const data = registrationSchema.parse(input);
+  await throttle("registration_address", trustedClientAddress, 10);
+  await throttle("registration_account", data.email, 3);
+  const passwordHash = await hashPassword(data.password);
+  let user: NonNullable<Awaited<ReturnType<typeof findUserById>>>;
+  try {
+    user = await createClinicOwner({ clinicName: data.clinicName, displayName: data.displayName, email: data.email, passwordHash });
+  } catch (error) {
+    const cause = error instanceof Error && "cause" in error ? error.cause : error;
+    if (cause && typeof cause === "object" && "code" in cause && cause.code === "23505") throw new AuthenticationError("We couldn’t create this workspace. If you already have an account, sign in instead.");
+    throw error;
+  }
+  return beginChallenge(user);
+}
+async function beginChallenge(user: NonNullable<Awaited<ReturnType<typeof findUserById>>>) {
   const authenticatedAt = Date.now();
   if (user.role === "patient" && !user.mfaSecret) return { kind: "session" as const, ...await createSession(actorFor(user, authenticatedAt, false, false)) };
   const challenge = newToken();
