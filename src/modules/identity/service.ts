@@ -2,9 +2,9 @@ import "server-only";
 import { z } from "zod";
 import { getDb, type Transaction } from "@/platform/db";
 import { resolvePatientScope } from "@/modules/scheduling";
-import { actorSchema, emergencySchema, purposeSchema, type Actor, type AccessPurpose } from "./validators";
+import { actorSchema, auditFilterSchema, emergencySchema, purposeSchema, type Actor, type AccessPurpose } from "./validators";
 import { roleAllowsPurpose, hasFreshTotp } from "./policy";
-import { appendAudit, createEmergencyRelationship, findUserById, hasCareRelationship } from "./repository";
+import { appendAudit, createEmergencyRelationship, findClinicSettings, findUserById, hasCareRelationship, listAuditEvents, listClinicians, verifyAuditChain } from "./repository";
 
 export class AccessDeniedError extends Error {
   constructor() { super("You do not have permission to access this record."); this.name = "AccessDeniedError"; }
@@ -42,4 +42,32 @@ export async function auditedPatientOperation<T>(tx: Transaction, actor: Actor, 
   const result = await operation();
   await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, patientId, action, purpose, outcome: "allowed" }, tx);
   return result;
+}
+/** Audit for clinic-scoped work that resolves no single patient, such as a queue read. */
+export async function recordScopedEvent(inputActor: Actor, event: { action: string; purpose: string; resourceId?: string; reason?: string }, tx?: Transaction) {
+  const actor = actorSchema.parse(inputActor);
+  await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, action: event.action, purpose: event.purpose, outcome: "allowed", resourceId: event.resourceId, reason: event.reason }, tx);
+}
+export async function listCareProviders(inputActor: Actor) {
+  const actor = actorSchema.parse(inputActor);
+  if (!await currentActorIsValid(actor)) throw new AccessDeniedError();
+  return listClinicians(actor.clinicId);
+}
+export async function getClinicSettings(inputActor: Actor) {
+  const actor = actorSchema.parse(inputActor);
+  if (!await currentActorIsValid(actor)) throw new AccessDeniedError();
+  return findClinicSettings(actor.clinicId);
+}
+// Administrators may read the audit log. That privilege grants no chart access, and
+// reading the log is itself an audited event.
+export async function readAuditLog(inputActor: Actor, input: unknown) {
+  const actor = actorSchema.parse(inputActor);
+  const filters = auditFilterSchema.parse(input);
+  if (actor.role !== "admin" || !actor.mfaVerified || !await currentActorIsValid(actor)) {
+    await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, action: "audit.denied", purpose: "audit", outcome: "denied" });
+    throw new AccessDeniedError();
+  }
+  await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, patientId: filters.patientId ?? null, action: "audit.viewed", purpose: "audit", outcome: "allowed" });
+  const [events, integrity] = await Promise.all([listAuditEvents(actor.clinicId, filters), verifyAuditChain()]);
+  return { events, integrity };
 }

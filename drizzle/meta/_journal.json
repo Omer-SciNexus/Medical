@@ -15,6 +15,13 @@
       "when": 1789871231888,
       "tag": "0001_security_invariants",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791960705707,
+      "tag": "0002_audit_hash_chain",
+      "breakpoints": true
     }
   ]
 }
