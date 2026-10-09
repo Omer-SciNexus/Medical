@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { eq, sql } from "drizzle-orm";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { todayInZone } from "../src/lib/clinic-day";
 import { hashPassword } from "../src/modules/identity/crypto";
 import { clinics, users, careRelationships, auditLog } from "../src/modules/identity/schema";
 import { patients, availabilitySlots, appointments } from "../src/modules/scheduling/schema";
@@ -22,9 +23,15 @@ const names = [
   ["Jonas", "Lind", "male"], ["Melis", "Güler", "female"], ["Eren", "Bozkurt", "male"], ["Nora", "Jensen", "female"], ["Burak", "Özdemir", "male"],
 ] as const;
 
-export async function seedDatabase(connectionString: string, password: string) {
+// clinicDay anchors every generated timestamp. It defaults to a fixed date so tests stay
+// deterministic; the command line passes today so a fresh demo has a populated clinic.
+export async function seedDatabase(connectionString: string, password: string, clinicDay = "2026-09-21") {
   if (process.env.NODE_ENV === "production") throw new Error("Development seeding is disabled in production.");
   if (password.length < 15 || password.length > 256) throw new Error("SEED_PASSWORD must be 15–256 characters.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clinicDay)) throw new Error("The seed clinic day must be formatted YYYY-MM-DD.");
+  const dayStart = Date.parse(`${clinicDay}T00:00:00Z`);
+  if (!Number.isFinite(dayStart)) throw new Error("The seed clinic day is not a real date.");
+  const at = (minutes: number) => new Date(dayStart + minutes * 60_000);
   const client = new Client({ connectionString });
   await client.connect();
   try {
@@ -55,7 +62,7 @@ export async function seedDatabase(connectionString: string, password: string) {
         if (i % 5 === 0) await tx.insert(allergies).values({ ...record, patientId, substance: "Penicillin", reaction: "Urticaria", severity: "moderate" });
         if (i % 4 === 0) await tx.insert(problems).values({ ...record, patientId, description: "Essential hypertension", status: "active" });
         if (i % 7 === 0 && i !== 0) await tx.insert(problems).values({ ...record, patientId, description: "Type 2 diabetes mellitus", status: "active" });
-        const observedAt = new Date("2026-09-21T05:45:00Z");
+        const observedAt = at(5 * 60 + 45);
         await tx.insert(observations).values([
           { ...record, patientId, label: "Systolic blood pressure", value: i % 4 === 0 ? "142" : "118", unit: "mmHg", referenceLow: "90", referenceHigh: "139", flag: i % 4 === 0 ? "high" : "normal", observedAt },
           { ...record, patientId, label: "Heart rate", value: String(68 + i % 17), unit: "bpm", referenceLow: "60", referenceHigh: "100", flag: "normal", observedAt },
@@ -72,19 +79,27 @@ export async function seedDatabase(connectionString: string, password: string) {
       ]);
       for (let i = 0; i < 36; i++) {
         const providerId = i % 2 === 0 ? seedIds.clinician : seedIds.secondClinician;
-        const startsAt = new Date(new Date("2026-09-21T06:00:00Z").getTime() + Math.floor(i / 2) * 20 * 60_000);
+        const startsAt = at(6 * 60 + Math.floor(i / 2) * 20);
         await tx.insert(availabilitySlots).values({ ...record, id: seedId(300 + i), providerId, startsAt, endsAt: new Date(startsAt.getTime() + 20 * 60_000) });
-        if (i < 12) await tx.insert(appointments).values({ ...record, id: seedId(400 + i), patientId: seedId(100 + i), slotId: seedId(300 + i), reason: i % 4 === 0 ? "Blood pressure review" : i % 7 === 0 ? "Diabetes follow-up" : "Annual health review", preparation: "Bring your current medication list and any recent test results.", status: i === 0 ? "in_progress" : i < 3 ? "ready" : i < 5 ? "checked_in" : "booked", checkedInAt: i < 5 ? new Date("2026-09-21T05:50:00Z") : null });
+        if (i < 12) await tx.insert(appointments).values({ ...record, id: seedId(400 + i), patientId: seedId(100 + i), slotId: seedId(300 + i), reason: i % 4 === 0 ? "Blood pressure review" : i % 7 === 0 ? "Diabetes follow-up" : "Annual health review", preparation: "Bring your current medication list and any recent test results.", status: i === 0 ? "in_progress" : i < 3 ? "ready" : i < 5 ? "checked_in" : "booked", checkedInAt: i < 5 ? at(5 * 60 + 50) : null });
+      }
+      // Unbooked slots on the four following days, so patient booking always has real
+      // future availability regardless of when the seed was run.
+      for (let i = 0; i < 48; i++) {
+        const providerId = i % 2 === 0 ? seedIds.clinician : seedIds.secondClinician;
+        const startsAt = at((1 + Math.floor(i / 12)) * 1440 + 9 * 60 + Math.floor((i % 12) / 2) * 30);
+        await tx.insert(availabilitySlots).values({ ...record, id: seedId(340 + i), providerId, startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000) });
       }
       await tx.insert(encounters).values({ ...record, id: seedId(500), patientId: seedIds.firstPatient, appointmentId: seedId(400), clinicianId: seedIds.clinician });
       await tx.insert(noteVersions).values({ ...record, patientId: seedIds.firstPatient, encounterId: seedId(500), version: 1, content: "Subjective: Attending scheduled blood pressure review. No new symptoms reported.\nObjective: Blood pressure 142/88 mmHg. Pulse 76 bpm.\nAssessment: Hypertension follow-up; assessment in progress.\nPlan: Clinician to review home readings and current medicines. Synthetic draft, not a treatment recommendation." });
       await tx.insert(auditLog).values({ clinicId: seedIds.clinic, actorId: seedIds.system, action: "development.synthetic_seed", purpose: "development", outcome: "allowed" });
-      return "Seeded 40 synthetic patients, 36 slots, 12 appointments and one draft encounter. No prescriptions issued.";
+      return `Seeded 40 synthetic patients, 84 slots (36 on ${clinicDay} plus four following days), 12 appointments and one draft encounter. No prescriptions issued.`;
     });
   } finally { await client.end(); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) throw new Error("Set MIGRATION_DATABASE_URL for the development seed.");
-  seedDatabase(url, process.env.SEED_PASSWORD ?? "").then(console.log).catch(() => { console.error("Seed failed. Check migrations, owner connection and SEED_PASSWORD. Production seeding is prohibited."); process.exitCode = 1; });
+  const day = process.env.SEED_CLINIC_DAY ?? todayInZone(process.env.CLINIC_TIMEZONE || "Europe/Istanbul");
+  seedDatabase(url, process.env.SEED_PASSWORD ?? "", day).then(console.log).catch(() => { console.error("Seed failed. Check migrations, owner connection and SEED_PASSWORD. Production seeding is prohibited."); process.exitCode = 1; });
 }
