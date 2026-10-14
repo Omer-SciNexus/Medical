@@ -20,6 +20,12 @@ Verified on this host: TypeScript, ESLint including domain boundaries, **64 unit
 
 **The integration suite still has not run.** Docker is not installed on this machine, so the 34 existing tests and the 13 new visit-thread tests did not execute. Those new tests are written and committed: they cover the complete thread, concurrent slot claiming, stale-revision rejection, signed-text preservation through amendment, charge idempotency, cross-patient summary denial, refusal to bill an unsigned note, and hash-chain tamper detection. Until they run against real PostgreSQL and Redis, every claim above about transactional and chaining behaviour is **unverified on this host**.
 
+## Dependency advisories
+
+Production dependencies report zero advisories and CI blocks on that gate (`npm audit --omit=dev`). Next.js is pinned to 15.5.27 for the SSG/ISR cache-poisoning advisory, and narrowly scoped overrides take patched `source-map-js` 1.2.2, `sharp` 0.35.5 and PostCSS 8.5.28. Revalidate those overrides when upgrading their parent dependencies.
+
+Development-only advisories are reported without blocking, because one of them has no fix to take. The `braces` stack-exhaustion advisory ([GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)) affects every published version of the package, so no override resolves it. It reaches this project only through `eslint-config-next` → `@next/eslint-plugin-next` → `fast-glob` → `micromatch`, at lint time, matching globs over paths in this repository; it is absent from the application's own dependency tree and never runs against untrusted input. The only fix `npm audit fix --force` offers is downgrading to `eslint-config-next@14.2.35`, which would lint a Next.js 15 application with Next.js 14 rules. Revisit when `braces` publishes a patched version.
+
 ## Previous delivery — marketing and account flows
 
 Following the design revision, the user requested a marketing homepage and sign-in/sign-up flows. Those routes are now implemented. `/design` remains a synthetic interactive preview; `/dashboard` is an authenticated account welcome screen that now routes each role to its starting screen.
