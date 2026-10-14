@@ -13,7 +13,7 @@ import { AccessDeniedError } from "../../src/modules/identity/service";
 import { advanceAppointment, bookAppointment, getClinicianQueue, listProviderAvailability } from "../../src/modules/scheduling/service";
 import { SlotUnavailableError } from "../../src/modules/scheduling/validators";
 import { amendNote, finishEncounter, getVisitSummary, saveNote, signNote, startEncounter } from "../../src/modules/clinical/service";
-import { NoteConflictError } from "../../src/modules/clinical/validators";
+import { EncounterStateError, NoteConflictError } from "../../src/modules/clinical/validators";
 import type { Actor } from "../../src/modules/identity/validators";
 
 let postgres: StartedPostgreSqlContainer | undefined;
@@ -139,8 +139,17 @@ describe("the complete visit thread", () => {
     expect(versions.rows).toHaveLength(2);
     expect(versions.rows[0].status).toBe("amended");
     expect(versions.rows[0].content).toContain("intermittent headache");
-    expect(versions.rows[1].previous_version_id).toBe(versions.rows[0] && note.rows[0].id);
+    expect(versions.rows[1].previous_version_id).toBe(note.rows[0].id);
     expect(versions.rows[1].amendment_reason).toContain("Corrected");
+    expect(versions.rows[1].status).toBe("draft");
+  });
+  it("requires the amendment to be signed in its own right before the visit can complete", async () => {
+    // An amendment does not inherit the previous signature, so the visit is not billable yet.
+    await expect(finishEncounter(clinician(), { encounterId, summary: "Attempting to complete on an unsigned amendment." })).rejects.toBeInstanceOf(EncounterStateError);
+    const amended = await owner.query("SELECT id, revision FROM note_versions WHERE encounter_id = $1 ORDER BY version DESC LIMIT 1", [encounterId]);
+    await signNote(clinician(), { encounterId, versionId: amended.rows[0].id, revision: amended.rows[0].revision });
+    const signed = await owner.query("SELECT status, signed_by FROM note_versions WHERE id = $1", [amended.rows[0].id]);
+    expect(signed.rows[0]).toMatchObject({ status: "signed", signed_by: seedIds.clinician });
   });
   it("records exactly one charge however many times completion is submitted", async () => {
     const summary = "We talked about your headaches and agreed to review your blood pressure readings at home over the next two weeks.";

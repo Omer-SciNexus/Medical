@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canTransition, roleMayTransition, waitingMinutes } from "../../src/modules/scheduling/policy";
+import { isUniqueViolation } from "../../src/platform/errors";
+import { DrizzleQueryError } from "drizzle-orm/errors";
 import { encounterIsCompletable, noteIsEditable, noteIsSignable, observationFlag, patientAge } from "../../src/modules/clinical/policy";
 import { outboxKey } from "../../src/platform/outbox";
 
@@ -36,6 +38,32 @@ describe("appointment transitions", () => {
   });
 });
 
+describe("detecting a lost race on a claimed slot", () => {
+  // A slot claim relies on a unique index, so recognising its violation is what turns a lost
+  // race into "that time was just taken" instead of a generic failure.
+  const pgError = () => Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
+  it("finds the Postgres code through Drizzle's wrapper", () => {
+    expect(isUniqueViolation(new DrizzleQueryError("insert into appointments", [], pgError()))).toBe(true);
+  });
+  it("finds it on a bare driver error and through nested causes", () => {
+    expect(isUniqueViolation(pgError())).toBe(true);
+    expect(isUniqueViolation(new Error("outer", { cause: new Error("inner", { cause: pgError() }) }))).toBe(true);
+  });
+  it("ignores other failures so they are not misreported as a taken slot", () => {
+    expect(isUniqueViolation(Object.assign(new Error("not null"), { code: "23502" }))).toBe(false);
+    expect(isUniqueViolation(new DrizzleQueryError("insert", [], Object.assign(new Error("fk"), { code: "23503" })))).toBe(false);
+    expect(isUniqueViolation(new Error("connection terminated"))).toBe(false);
+    expect(isUniqueViolation(null)).toBe(false);
+    expect(isUniqueViolation(undefined)).toBe(false);
+    expect(isUniqueViolation("23505")).toBe(false);
+  });
+  it("terminates on a self-referencing cause instead of recursing forever", () => {
+    const looping = new Error("looping") as Error & { cause?: unknown };
+    looping.cause = looping;
+    expect(isUniqueViolation(looping)).toBe(false);
+  });
+});
+
 describe("note and encounter state", () => {
   it("only allows editing a draft", () => {
     expect(noteIsEditable("draft")).toBe(true);
@@ -50,8 +78,10 @@ describe("note and encounter state", () => {
   it("refuses to complete a visit whose note is unsigned", () => {
     expect(encounterIsCompletable("in_progress", "draft")).toBe(false);
     expect(encounterIsCompletable("in_progress", "signed")).toBe(true);
-    expect(encounterIsCompletable("in_progress", "amended")).toBe(true);
     expect(encounterIsCompletable("completed", "signed")).toBe(false);
+    // 'amended' only ever marks a superseded version. The current version after an
+    // amendment is a draft, so it must be signed again before the visit can complete.
+    expect(encounterIsCompletable("in_progress", "amended")).toBe(false);
   });
   it("flags observations against their reference range", () => {
     expect(observationFlag(118, 90, 139)).toBe("normal");

@@ -121,7 +121,9 @@ export function NoteEditor({ note, encounter, charge, fee, aiEnabled }: {
       </form>
     </Modal>
 
-    {(note.status === "signed" || note.status === "amended") && encounter.status === "in_progress" ? <section className="complete-visit">
+    {/* Only a signed current version is completable. After an amendment the current version
+        is a draft again, so this section correctly disappears until it is signed. */}
+    {note.status === "signed" && encounter.status === "in_progress" ? <section className="complete-visit">
       <h3><Receipt /> Complete the visit</h3>
       <p className="muted">Completing records one charge, marks the appointment done and publishes the summary the patient reads. It cannot be undone from this screen.</p>
       <form action={complete}>
