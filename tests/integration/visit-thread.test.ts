@@ -10,7 +10,7 @@ import { seedDatabase, seedId, seedIds } from "../../scripts/seed";
 import { encryptSecret } from "../../src/modules/identity/crypto";
 import { verifyAuditChain } from "../../src/modules/identity/repository";
 import { AccessDeniedError } from "../../src/modules/identity/service";
-import { advanceAppointment, bookAppointment, getClinicianQueue, listProviderAvailability } from "../../src/modules/scheduling/service";
+import { advanceAppointment, bookAppointment, getClinicianQueue, getPatientIdentity, listProviderAvailability } from "../../src/modules/scheduling/service";
 import { SlotUnavailableError } from "../../src/modules/scheduling/validators";
 import { amendNote, finishEncounter, getVisitSummary, saveNote, signNote, startEncounter } from "../../src/modules/clinical/service";
 import { EncounterStateError, NoteConflictError } from "../../src/modules/clinical/validators";
@@ -181,6 +181,13 @@ describe("the complete visit thread", () => {
 });
 
 describe("audit chain", () => {
+  it("keeps seq order and chain order identical when events are written concurrently", async () => {
+    // This is the case that broke the chain: the seq column's sequence default is evaluated
+    // before the chaining trigger takes its lock, so two writers could take seq values in
+    // one order and the lock in the other, leaving a lower seq chained onto a higher one.
+    await Promise.all([0, 2, 4, 6, 8, 10, 12, 14].map((index) => getPatientIdentity(clinician(), seedId(100 + index))));
+    expect((await verifyAuditChain()).brokenSeq).toBeNull();
+  });
   it("chains every event and verifies the whole log", async () => {
     const result = await verifyAuditChain();
     expect(result.checked).toBeGreaterThan(10);
@@ -189,6 +196,11 @@ describe("audit chain", () => {
     expect(unchained.rows[0].count).toBe(0);
     const first = await owner.query("SELECT prev_hash FROM audit_log ORDER BY seq LIMIT 1");
     expect(first.rows[0].prev_hash).toBeNull();
+    // seq now comes from the highest committed row inside the lock, so it is contiguous
+    // from 1: a rolled-back transaction consumes no value the way a sequence would.
+    const shape = await owner.query("SELECT count(*)::int AS total, min(seq)::int AS lowest, max(seq)::int AS highest FROM audit_log");
+    expect(shape.rows[0].lowest).toBe(1);
+    expect(shape.rows[0].highest).toBe(shape.rows[0].total);
   });
   it("detects a row altered by the table owner, which append-only grants alone cannot", async () => {
     // The owner can bypass the append-only trigger; the chain is what makes that visible.

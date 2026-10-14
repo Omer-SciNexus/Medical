@@ -54,7 +54,9 @@ export const auditLog = pgTable("audit_log", {
   resourceId: uuid("resource_id"),
   reason: text("reason"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  // Chain fields are assigned by a database trigger; the runtime role cannot read or forge them.
+  // All three are assigned by the chaining trigger, which overwrites whatever the caller
+  // supplied. seq comes from the highest committed row inside the trigger's lock rather than
+  // from the sequence default, so seq order and chain order cannot diverge.
   seq: bigserial("seq", { mode: "number" }).notNull(),
   prevHash: text("prev_hash"),
   hash: text("hash"),
