@@ -20,3 +20,10 @@ export const registrationSchema = z.object({
 }).refine((data) => data.password === data.confirmPassword, { path: ["confirmPassword"], message: "Your passwords don’t match." });
 export const challengeSchema = z.object({ challenge: z.string().regex(/^[a-f0-9]{64}$/), code: z.string().regex(/^(\d{6}|[A-F0-9]{8}-[A-F0-9]{8})$/) });
 export const emergencySchema = z.object({ patientId: z.uuid(), reason: z.string().trim().min(20).max(1000) });
+// Patient names never become audit filters; the viewer filters on identifiers only.
+export const auditFilterSchema = z.object({
+  actorId: z.uuid().optional(), patientId: z.uuid().optional(),
+  action: z.string().trim().regex(/^[a-z_]+\.[a-z_]+$/).max(60).optional(),
+  from: z.coerce.date().optional(), to: z.coerce.date().optional(),
+  before: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(100).default(50),
+});

@@ -2,6 +2,7 @@ import "server-only";
 import { TOTP, Secret } from "otpauth";
 import { z } from "zod";
 import { getRedis } from "@/platform/redis";
+import { isUniqueViolation } from "@/platform/errors";
 import { hashPassword, verifyPassword, digest, encryptSecret, decryptSecret, newToken, newRecoveryCodes } from "./crypto";
 import { findUserByEmail, findUserById, appendAudit, enrollMfa, consumeRecoveryCode, createClinicOwner } from "./repository";
 import { createSession } from "./sessions";
@@ -42,8 +43,7 @@ export async function registerWorkspace(input: unknown, trustedClientAddress: st
   try {
     user = await createClinicOwner({ clinicName: data.clinicName, displayName: data.displayName, email: data.email, passwordHash });
   } catch (error) {
-    const cause = error instanceof Error && "cause" in error ? error.cause : error;
-    if (cause && typeof cause === "object" && "code" in cause && cause.code === "23505") throw new AuthenticationError("We couldn’t create this workspace. If you already have an account, sign in instead.");
+    if (isUniqueViolation(error)) throw new AuthenticationError("We couldn’t create this workspace. If you already have an account, sign in instead.");
     throw error;
   }
   return beginChallenge(user);

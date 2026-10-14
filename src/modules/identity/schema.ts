@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, pgEnum, uuid, text, timestamp, boolean, index, uniqueIndex, check } from "drizzle-orm/pg-core";
+import { pgTable, pgEnum, uuid, text, timestamp, boolean, bigserial, index, uniqueIndex, check } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("user_role", ["patient", "clinician", "staff", "admin"]);
 export const purposeEnum = pgEnum("access_purpose", ["patient.view", "scheduling", "clinical.read", "clinical.write", "prescribe"]);
@@ -54,5 +54,12 @@ export const auditLog = pgTable("audit_log", {
   resourceId: uuid("resource_id"),
   reason: text("reason"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  // All three are assigned by the chaining trigger, which overwrites whatever the caller
+  // supplied. seq comes from the highest committed row inside the trigger's lock rather than
+  // from the sequence default, so seq order and chain order cannot diverge.
+  seq: bigserial("seq", { mode: "number" }).notNull(),
+  prevHash: text("prev_hash"),
+  hash: text("hash"),
 }, (t) => [index("audit_clinic_time").on(t.clinicId, t.createdAt), index("audit_patient_time").on(t.patientId, t.createdAt), index("audit_actor_time").on(t.actorId, t.createdAt),
+  uniqueIndex("audit_seq_unique").on(t.seq),
   check("audit_outcome", sql`${t.outcome} IN ('allowed', 'denied', 'emergency')`)]);

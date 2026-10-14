@@ -1,5 +1,5 @@
 export type { Actor, AccessPurpose } from "./validators";
-export { assertCanAccessPatient, auditedPatientOperation, requestBreakGlass, AccessDeniedError } from "./service";
+export { assertCanAccessPatient, auditedPatientOperation, requestBreakGlass, recordScopedEvent, listCareProviders, getClinicSettings, readAuditLog, AccessDeniedError } from "./service";
 export { beginSignIn, finishSignIn, registerWorkspace } from "./auth";
 export { resolveSession, revokeSession, revokeAllSessions, SESSION_COOKIE } from "./sessions";
 export { assertSameOrigin, authCookieOptions, setSessionCookie, authConfigured } from "./http";
