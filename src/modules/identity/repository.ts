@@ -1,6 +1,6 @@
 import "server-only";
-import { and, eq, isNull, or, gt, sql } from "drizzle-orm";
-import { getDb, type Transaction } from "@/platform/db";
+import { and, asc, desc, eq, gte, isNull, lt, lte, or, gt, sql } from "drizzle-orm";
+import { getDb, getAuditDb, type Transaction } from "@/platform/db";
 import { auditLog, careRelationships, clinics, users } from "./schema";
 import type { Actor, AccessPurpose } from "./validators";
 
@@ -53,6 +53,34 @@ export async function enrollMfa(userId: string, encrypted: string, recoveryHashe
     await appendAudit({ clinicId: user.clinicId, actorId: user.id, action: "identity.mfa_enrolled", purpose: "authentication", outcome: "allowed" }, tx);
     return user;
   });
+}
+export async function listClinicians(clinicId: string) {
+  return getDb().select({ id: users.id, displayName: users.displayName }).from(users)
+    .where(and(eq(users.clinicId, clinicId), eq(users.role, "clinician"), eq(users.active, true))).orderBy(asc(users.displayName)).limit(100);
+}
+export async function findClinicSettings(clinicId: string) {
+  const [clinic] = await getDb().select({ id: clinics.id, name: clinics.name, timezone: clinics.timezone, currency: clinics.currency }).from(clinics).where(eq(clinics.id, clinicId)).limit(1);
+  return clinic;
+}
+export type AuditFilters = { actorId?: string; patientId?: string; action?: string; from?: Date; to?: Date; before?: number; limit: number };
+// Reads use the auditor credential and return identifiers only; it holds no grant on
+// users or patients, so no name can be resolved here even by an authorized viewer.
+export async function listAuditEvents(clinicId: string, filters: AuditFilters) {
+  return getAuditDb().select({ seq: auditLog.seq, id: auditLog.id, actorId: auditLog.actorId, patientId: auditLog.patientId, action: auditLog.action,
+    purpose: auditLog.purpose, outcome: auditLog.outcome, resourceId: auditLog.resourceId, reason: auditLog.reason, createdAt: auditLog.createdAt, hash: auditLog.hash })
+    .from(auditLog).where(and(eq(auditLog.clinicId, clinicId),
+      filters.actorId ? eq(auditLog.actorId, filters.actorId) : undefined,
+      filters.patientId ? eq(auditLog.patientId, filters.patientId) : undefined,
+      filters.action ? eq(auditLog.action, filters.action) : undefined,
+      filters.from ? gte(auditLog.createdAt, filters.from) : undefined,
+      filters.to ? lte(auditLog.createdAt, filters.to) : undefined,
+      filters.before ? lt(auditLog.seq, filters.before) : undefined))
+    .orderBy(desc(auditLog.seq)).limit(filters.limit);
+}
+export async function verifyAuditChain() {
+  const rows = await getAuditDb().execute<{ checked: string | number; broken_seq: string | number | null }>(sql`SELECT * FROM verify_audit_chain()`);
+  const [result] = "rows" in rows ? rows.rows : (rows as unknown as { checked: string | number; broken_seq: string | number | null }[]);
+  return { checked: Number(result?.checked ?? 0), brokenSeq: result?.broken_seq == null ? null : Number(result.broken_seq) };
 }
 export async function consumeRecoveryCode(userId: string, codeHash: string) {
   const result = await getDb().transaction(async (tx) => {

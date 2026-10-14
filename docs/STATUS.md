@@ -1,8 +1,34 @@
-# Delivery status — 20 September 2026
+# Delivery status — 14 October 2026
 
-## Current delivery
+## Current delivery — the complete visit thread
 
-Following the design revision, the user requested a marketing homepage and sign-in/sign-up flows. Those routes are now implemented. `/design` remains a synthetic interactive preview; `/dashboard` is an authenticated account welcome screen. This is not the completed clinical platform or a production-ready deployment.
+The project is now scoped as a **demonstration build**, not a deployment candidate: no certification, national-system integration or legal review is in scope. The request was to implement features, and this delivery adds the first complete vertical slice of the clinical workflow with real services behind it.
+
+Five screens are implemented end to end: `/patient/book`, `/clinical/today`, `/clinical/encounters/[uuid]`, `/patient/visits/[uuid]` and `/admin/audit`. One patient can now be booked, moved through the waiting room, seen, have a note written, signed and amended, be charged once, and read the published summary their clinician wrote.
+
+What is new behind those screens:
+
+- **Scheduling services**: server-owned availability, transactional slot claiming that defers to the `active_slot_booking` partial unique index, a pure transition table with server-side role checks, and revision-checked appointment transitions.
+- **Clinical services**: one encounter per appointment, note autosave guarded by a stored revision, signing that freezes a version, and amendment that creates a linked version while the signed text is retained by its database trigger.
+- **Completion transaction**: verifies the note is signed, records exactly one charge in integer minor units, closes the appointment and enqueues identifier-only outbox events, all in one transaction. Repeat submissions return the committed result rather than charging twice.
+- **Audit hash chaining** (`drizzle/0002_audit_hash_chain.sql`, ordering corrected in `0003_audit_chain_order.sql`): each event stores a SHA-256 hash over its own fields and the previous event's hash, assigned by a `SECURITY DEFINER` trigger because the runtime role cannot read the log. `verify_audit_chain()` recomputes the whole chain and is granted only to the auditor credential. This upgrades the log from tamper-**resistant** to tamper-**evident**: the integration suite proves that a row altered by the table owner, bypassing the append-only trigger, is detected. The position is assigned inside the trigger's lock rather than by the column's sequence default, because a sequence is evaluated before the trigger fires and could therefore order two concurrent writers differently from the chain itself.
+- **Audit viewer**: reads through the separate `meridian_auditor` credential, which holds no grant on `users` or `patients`, so no name can be resolved there even by an authorized administrator. Opening the log is itself an audited event, and administration still grants no chart access.
+- **Note-drafting assistance** (optional): when `ANTHROPIC_API_KEY` is set, a clinician can request a draft built from the chart and their own notes. Only clinical facts are sent — no name, MRN, date of birth or internal identifier. The draft must be edited and signed by the clinician; nothing is saved or signed on their behalf. The feature hides itself when the key is absent.
+- **Seed clinic day is now configurable.** `seedDatabase` still defaults to 21 September 2026 so the existing tests stay deterministic, while the command line seeds *today* and adds 48 unbooked slots across the following four days, so a fresh demo has both a populated clinic day and real future availability.
+
+Verified on this host: TypeScript, ESLint including domain boundaries, **64 unit tests**, **27 Playwright tests** and a production build. The five new routes are server-rendered on demand at 107–156 kB first-load JavaScript; `/patient/visits/[uuid]` ships no client island at all.
+
+**The integration suite still has not run.** Docker is not installed on this machine, so the 34 existing tests and the 13 new visit-thread tests did not execute. Those new tests are written and committed: they cover the complete thread, concurrent slot claiming, stale-revision rejection, signed-text preservation through amendment, charge idempotency, cross-patient summary denial, refusal to bill an unsigned note, and hash-chain tamper detection. Until they run against real PostgreSQL and Redis, every claim above about transactional and chaining behaviour is **unverified on this host**.
+
+## Dependency advisories
+
+Production dependencies report zero advisories and CI blocks on that gate (`npm audit --omit=dev`). Next.js is pinned to 15.5.27 for the SSG/ISR cache-poisoning advisory, and narrowly scoped overrides take patched `source-map-js` 1.2.2, `sharp` 0.35.5 and PostCSS 8.5.28. Revalidate those overrides when upgrading their parent dependencies.
+
+Development-only advisories are reported without blocking, because one of them has no fix to take. The `braces` stack-exhaustion advisory ([GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)) affects every published version of the package, so no override resolves it. It reaches this project only through `eslint-config-next` → `@next/eslint-plugin-next` → `fast-glob` → `micromatch`, at lint time, matching globs over paths in this repository; it is absent from the application's own dependency tree and never runs against untrusted input. The only fix `npm audit fix --force` offers is downgrading to `eslint-config-next@14.2.35`, which would lint a Next.js 15 application with Next.js 14 rules. Revisit when `braces` publishes a patched version.
+
+## Previous delivery — marketing and account flows
+
+Following the design revision, the user requested a marketing homepage and sign-in/sign-up flows. Those routes are now implemented. `/design` remains a synthetic interactive preview; `/dashboard` is an authenticated account welcome screen that now routes each role to its starting screen.
 
 ## Marketing and account flows
 
