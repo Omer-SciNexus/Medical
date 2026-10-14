@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, eq, gte, isNull, lt, ne, notExists, sql } from "drizzle-orm";
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, type Actor } from "@/modules/identity";
+import { isUniqueViolation } from "@/platform/errors";
 import { appointments, availabilitySlots, patients } from "./schema";
 import { SlotUnavailableError, StaleAppointmentError, type AppointmentStatus } from "./validators";
 
@@ -11,7 +12,6 @@ export async function patientIsInClinic(clinicId: string, patientId: string, tx?
   return Boolean(patient);
 }
 const unclaimed = (slotId: typeof availabilitySlots.id) => notExists(getDb().select({ one: sql`1` }).from(appointments).where(and(eq(appointments.slotId, slotId), isNull(appointments.deletedAt), ne(appointments.status, "cancelled"))));
-const isUniqueViolation = (error: unknown) => typeof error === "object" && error !== null && (error as { code?: string }).code === "23505";
 
 export async function listOpenSlots(clinicId: string, providerId: string, from: Date, to: Date) {
   return getDb().select({ id: availabilitySlots.id, startsAt: availabilitySlots.startsAt, endsAt: availabilitySlots.endsAt }).from(availabilitySlots)
