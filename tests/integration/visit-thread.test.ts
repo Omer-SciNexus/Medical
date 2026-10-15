@@ -9,7 +9,8 @@ import { migrateDatabase } from "../../scripts/migrate";
 import { seedDatabase, seedId, seedIds } from "../../scripts/seed";
 import { encryptSecret } from "../../src/modules/identity/crypto";
 import { verifyAuditChain } from "../../src/modules/identity/repository";
-import { AccessDeniedError } from "../../src/modules/identity/service";
+import { AccessDeniedError, CHAIN_INTEGRITY_CACHE_KEY, readAuditLog } from "../../src/modules/identity/service";
+import { getRedis } from "../../src/platform/redis";
 import { advanceAppointment, bookAppointment, getClinicianQueue, getPatientIdentity, listProviderAvailability } from "../../src/modules/scheduling/service";
 import { SlotUnavailableError } from "../../src/modules/scheduling/validators";
 import { amendNote, finishEncounter, getVisitSummary, saveNote, signNote, startEncounter } from "../../src/modules/clinical/service";
@@ -25,6 +26,7 @@ const clinicDay = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
 
 const clinician = (overrides: Partial<Actor> = {}): Actor => ({ id: seedIds.clinician, clinicId: seedIds.clinic, role: "clinician", patientId: null, mfaVerified: true, authenticatedAt: Date.now(), mfaVerifiedAt: Date.now(), ...overrides });
 const staff = (): Actor => ({ id: seedIds.staff, clinicId: seedIds.clinic, role: "staff", patientId: null, mfaVerified: true, authenticatedAt: Date.now(), mfaVerifiedAt: Date.now() });
+const admin = (): Actor => ({ id: seedIds.admin, clinicId: seedIds.clinic, role: "admin", patientId: null, mfaVerified: true, authenticatedAt: Date.now(), mfaVerifiedAt: Date.now() });
 const patient = (index: number): Actor => ({ id: seedId(200 + index), clinicId: seedIds.clinic, role: "patient", patientId: seedId(100 + index), mfaVerified: false, authenticatedAt: Date.now(), mfaVerifiedAt: null });
 
 beforeAll(async () => {
@@ -201,6 +203,20 @@ describe("audit chain", () => {
     const shape = await owner.query("SELECT count(*)::int AS total, min(seq)::int AS lowest, max(seq)::int AS highest FROM audit_log");
     expect(shape.rows[0].lowest).toBe(1);
     expect(shape.rows[0].highest).toBe(shape.rows[0].total);
+  });
+  it("serves the admin's integrity read from a short cache instead of rehashing the log every view", async () => {
+    await getRedis().del(CHAIN_INTEGRITY_CACHE_KEY);
+    const first = await readAuditLog(admin(), {});
+    expect(first.integrity).toEqual(await verifyAuditChain());
+    // Overwrite the cache with a sentinel the real recompute could never produce, so a second
+    // read within the TTL proves it came from the cache rather than the database.
+    const sentinel = { checked: 999_999, brokenSeq: null };
+    await getRedis().set(CHAIN_INTEGRITY_CACHE_KEY, JSON.stringify(sentinel), "EX", 30);
+    const second = await readAuditLog(admin(), {});
+    expect(second.integrity).toEqual(sentinel);
+    await getRedis().del(CHAIN_INTEGRITY_CACHE_KEY);
+    const third = await readAuditLog(admin(), {});
+    expect(third.integrity).toEqual(await verifyAuditChain());
   });
   it("detects a row altered by the table owner, which append-only grants alone cannot", async () => {
     // The owner can bypass the append-only trigger; the chain is what makes that visible.

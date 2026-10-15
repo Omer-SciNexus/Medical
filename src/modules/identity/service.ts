@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { getDb, type Transaction } from "@/platform/db";
+import { getRedis } from "@/platform/redis";
 import { resolvePatientScope } from "@/modules/scheduling";
 import { actorSchema, auditFilterSchema, emergencySchema, purposeSchema, type Actor, type AccessPurpose } from "./validators";
 import { roleAllowsPurpose, hasFreshTotp } from "./policy";
@@ -58,6 +59,19 @@ export async function getClinicSettings(inputActor: Actor) {
   if (!await currentActorIsValid(actor)) throw new AccessDeniedError();
   return findClinicSettings(actor.clinicId);
 }
+export const CHAIN_INTEGRITY_CACHE_KEY = "audit:chain_integrity";
+const CHAIN_INTEGRITY_CACHE_SECONDS = 30;
+// verify_audit_chain() walks and rehashes the entire log; it is too expensive to run on every
+// page view. A short cache is a stand-in for the real fix (periodic checkpointed verification)
+// and bounds staleness to this TTL rather than recomputing on every click through the log.
+async function cachedChainIntegrity() {
+  const redis = getRedis();
+  const cached = await redis.get(CHAIN_INTEGRITY_CACHE_KEY);
+  if (cached) return JSON.parse(cached) as { checked: number; brokenSeq: number | null };
+  const result = await verifyAuditChain();
+  await redis.set(CHAIN_INTEGRITY_CACHE_KEY, JSON.stringify(result), "EX", CHAIN_INTEGRITY_CACHE_SECONDS);
+  return result;
+}
 // Administrators may read the audit log. That privilege grants no chart access, and
 // reading the log is itself an audited event.
 export async function readAuditLog(inputActor: Actor, input: unknown) {
@@ -68,6 +82,6 @@ export async function readAuditLog(inputActor: Actor, input: unknown) {
     throw new AccessDeniedError();
   }
   await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, patientId: filters.patientId ?? null, action: "audit.viewed", purpose: "audit", outcome: "allowed" });
-  const [events, integrity] = await Promise.all([listAuditEvents(actor.clinicId, filters), verifyAuditChain()]);
+  const [events, integrity] = await Promise.all([listAuditEvents(actor.clinicId, filters), cachedChainIntegrity()]);
   return { events, integrity };
 }

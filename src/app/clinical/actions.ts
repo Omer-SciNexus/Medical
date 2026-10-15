@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { assertSameOrigin } from "@/modules/identity";
-import { advanceAppointment } from "@/modules/scheduling";
+import { advanceAppointment, getAppointmentForCare } from "@/modules/scheduling";
 import { amendNote, AssistUnavailableError, draftNoteText, finishEncounter, getPatientChart, saveNote, signNote, startEncounter } from "@/modules/clinical";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
@@ -28,7 +28,14 @@ export async function startVisitAction(_previous: ActionState, form: FormData): 
     await assertSameOrigin();
     const actor = await requireActor(["clinician"]);
     const encounter = await startEncounter(actor, { appointmentId: String(form.get("appointmentId") ?? "") });
-    await advanceAppointment(actor, { appointmentId: encounter.appointmentId, revision: Number(form.get("revision") ?? 0), status: "in_progress" }).catch(() => undefined);
+    // openEncounter is idempotent, so a resubmission that lands after the appointment already
+    // advanced is harmless. Any other failure (a genuinely stale revision, a concurrent change)
+    // must not be swallowed: that is what used to leave the appointment stuck on "ready" while
+    // the visit went on to bill.
+    await advanceAppointment(actor, { appointmentId: encounter.appointmentId, revision: Number(form.get("revision") ?? 0), status: "in_progress" }).catch(async (error) => {
+      const current = await getAppointmentForCare(actor, encounter.appointmentId);
+      if (current.status !== "in_progress") throw error;
+    });
     encounterId = encounter.id;
   } catch (error) { return toActionState(error); }
   redirect(`/clinical/encounters/${encounterId}`);
