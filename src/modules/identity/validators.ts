@@ -35,6 +35,12 @@ export const acceptInvitationSchema = z.object({
   password: z.string().min(15, "Use at least 15 characters for your password.").max(128, "Use no more than 128 characters."),
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, { path: ["confirmPassword"], message: "Your passwords don’t match." });
+export const resetRequestSchema = z.object({ email: emailSchema });
+export const passwordResetSchema = z.object({
+  token: tokenSchema,
+  password: z.string().min(15, "Use at least 15 characters for your password.").max(128, "Use no more than 128 characters."),
+  confirmPassword: z.string(),
+}).refine((data) => data.password === data.confirmPassword, { path: ["confirmPassword"], message: "Your passwords don’t match." });
 export const userIdSchema = z.object({ userId: z.uuid() });
 export const invitationIdSchema = z.object({ invitationId: z.uuid() });
 export const relationshipIdSchema = z.object({ relationshipId: z.uuid() });

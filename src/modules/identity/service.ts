@@ -117,6 +117,9 @@ export async function invitePerson(inputActor: Actor, input: unknown, origin: st
   const actor = actorSchema.parse(inputActor);
   await requireAdmin(actor);
   const { email, displayName, role } = inviteSchema.parse(input);
+  // Mail goes out in this clinic's name, so the person sending it proves their own address first.
+  const inviter = await findUserById(actor.id);
+  if (!inviter?.emailVerifiedAt) throw new PersonAdminError("Confirm your own email address before inviting colleagues.");
   if (await findUserByEmail(email)) throw new PersonAdminError("Someone with that email address already has an account.");
   const token = newToken();
   let invitation: Awaited<ReturnType<typeof createInvitation>>;

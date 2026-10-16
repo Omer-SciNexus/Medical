@@ -137,6 +137,30 @@ export async function setUserActive(clinicId: string, userId: string, active: bo
   if (user) await appendAudit({ clinicId, actorId: updatedBy, action: active ? "identity.person_reactivated" : "identity.person_deactivated", purpose: "administration", outcome: "allowed", resourceId: userId });
   return user;
 }
+export async function setPassword(userId: string, passwordHash: string) {
+  const [user] = await getDb().update(users).set({ passwordHash, updatedAt: new Date() }).where(and(eq(users.id, userId), eq(users.active, true))).returning();
+  if (user) await appendAudit({ clinicId: user.clinicId, actorId: user.id, action: "identity.password_reset", purpose: "authentication", outcome: "allowed" });
+  return user;
+}
+export async function markEmailVerified(userId: string, tx?: Transaction) {
+  const [user] = await (tx ?? getDb()).update(users).set({ emailVerifiedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(users.id, userId), eq(users.active, true), isNull(users.emailVerifiedAt))).returning();
+  if (user) await appendAudit({ clinicId: user.clinicId, actorId: user.id, action: "identity.email_verified", purpose: "authentication", outcome: "allowed" }, tx);
+  return user;
+}
+/** Clears the authenticator so the next challenge enrolls a new one, keeping the account live. */
+export async function clearOwnMfa(userId: string) {
+  const [user] = await getDb().update(users).set({ mfaSecret: null, recoveryHashes: [], updatedAt: new Date() })
+    .where(and(eq(users.id, userId), eq(users.active, true))).returning();
+  if (user) await appendAudit({ clinicId: user.clinicId, actorId: user.id, action: "identity.mfa_restarted", purpose: "authentication", outcome: "allowed" });
+  return user;
+}
+export async function replaceRecoveryCodes(userId: string, hashes: string[]) {
+  const [user] = await getDb().update(users).set({ recoveryHashes: hashes, updatedAt: new Date() })
+    .where(and(eq(users.id, userId), eq(users.active, true), sql`${users.mfaSecret} IS NOT NULL`)).returning();
+  if (user) await appendAudit({ clinicId: user.clinicId, actorId: user.id, action: "identity.recovery_reissued", purpose: "authentication", outcome: "allowed" });
+  return user;
+}
 export async function clearMfaEnrollment(clinicId: string, userId: string, updatedBy: string) {
   const [user] = await getDb().update(users).set({ mfaSecret: null, recoveryHashes: [], updatedAt: new Date() }).where(and(eq(users.id, userId), eq(users.clinicId, clinicId))).returning();
   if (user) await appendAudit({ clinicId, actorId: updatedBy, action: "identity.mfa_reset", purpose: "administration", outcome: "allowed", resourceId: userId });

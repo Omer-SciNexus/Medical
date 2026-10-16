@@ -21,7 +21,7 @@ describe("authentication action boundary", () => {
   it("normalizes email, strips client role and clinic claims, and protects the MFA token", async () => {
     mock.register.mockResolvedValue({ kind: "enroll_mfa", challenge: "a".repeat(64), provisioningUri: "otpauth://totp/Meridian:test?secret=TESTSECRET&issuer=Meridian" });
     const result = await signUpAction(credentials, form({ displayName: " Test Owner ", clinicName: " Test Clinic ", email: " USER@EXAMPLE.TEST ", password, confirmPassword: password, role: "clinician", clinicId: "existing-clinic" }));
-    expect(mock.register).toHaveBeenCalledWith({ displayName: "Test Owner", clinicName: "Test Clinic", email: "user@example.test", password, confirmPassword: password }, "public-web");
+    expect(mock.register).toHaveBeenCalledWith({ displayName: "Test Owner", clinicName: "Test Clinic", email: "user@example.test", password, confirmPassword: password }, "public-web", "http://127.0.0.1:4000");
     expect(result).toEqual({ step: "enroll_mfa", secret: "TESTSECRET" });
     expect(mock.set).toHaveBeenCalledWith("meridian_challenge", "a".repeat(64), expect.objectContaining({ httpOnly: true, sameSite: "strict", maxAge: 300 }));
     expect(mock.setSession).not.toHaveBeenCalled();

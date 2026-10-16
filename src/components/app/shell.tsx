@@ -25,7 +25,8 @@ export function AppShell({ actor, clinicName, current, breadcrumb, children, reg
       <nav className="sidebar-section" aria-label="Workspace">
         <span className="eyebrow">Workspace</span>
         <div className="side-nav">{navigation[actor.role].map(({ href, label, icon: Icon }) =>
-          <Link key={href} href={href} data-active={current === href}><Icon />{label}</Link>)}</div>
+          <Link key={href} href={href} data-active={current === href}><Icon />{label}</Link>)}
+          <Link href="/account/security" data-active={current === "/account/security"}><ShieldCheck />Security</Link></div>
       </nav>
       <div className="sidebar-note">
         <div className="workspace-identity">

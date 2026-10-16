@@ -21,6 +21,8 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   mfaSecret: text("mfa_secret"),
   recoveryHashes: text("recovery_hashes").array().default(sql`'{}'::text[]`).notNull(),
+  /** Proof that this person controls the address: a clicked verification or invitation link. */
+  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   active: boolean("active").default(true).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

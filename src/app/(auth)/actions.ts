@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { AuthenticationError, acceptInvitation, assertSameOrigin, authConfigured, authCookieOptions, beginSignIn, finishSignIn, registerWorkspace, revokeSession, SESSION_COOKIE, setSessionCookie } from "@/modules/identity";
+import { AuthenticationError, acceptInvitation, assertSameOrigin, authConfigured, authCookieOptions, beginSignIn, completePasswordReset, finishSignIn, registerWorkspace, requestPasswordReset, revokeSession, SESSION_COOKIE, setSessionCookie } from "@/modules/identity";
 import type { AuthFormState } from "@/lib/auth-form-state";
 import { logOperational } from "@/platform/log";
 
@@ -33,14 +33,14 @@ function failure(error: unknown, step: AuthFormState["step"]): AuthFormState {
 async function credentialsAction(form: FormData, mode: "sign-in" | "sign-up" | "accept-invite"): Promise<AuthFormState> {
   let state: AuthFormState | null;
   try {
-    await assertSameOrigin();
+    const origin = await assertSameOrigin();
     // Validate before checking deployment configuration, so field feedback remains useful.
     const { loginSchema, registrationSchema, acceptInvitationSchema } = await import("@/modules/identity");
     const schema = mode === "sign-up" ? registrationSchema : mode === "accept-invite" ? acceptInvitationSchema : loginSchema;
     const data = schema.parse(Object.fromEntries(form));
     if (!authConfigured()) return { step: "credentials", error: unavailable };
     // Conservative shared bucket; never trust a client-supplied forwarding header for rate limits.
-    const result = mode === "sign-up" ? await registerWorkspace(data, "public-web")
+    const result = mode === "sign-up" ? await registerWorkspace(data, "public-web", origin)
       : mode === "accept-invite" ? await acceptInvitation(data, "public-web")
       : await beginSignIn(data, "public-web");
     state = await acceptResult(result);
@@ -65,6 +65,39 @@ export async function verifyAction(previous: AuthFormState, form: FormData): Pro
   } catch (error) { return failure(error, step); }
   if (state) return state;
   redirect("/dashboard");
+}
+export type ResetState = { sent?: boolean; done?: boolean; error?: string; errors?: Record<string, string[] | undefined> };
+// The reply is the same whether or not that address has an account: an unauthenticated
+// caller may not learn who is registered here.
+export async function requestResetAction(_previous: ResetState, form: FormData): Promise<ResetState> {
+  try {
+    const origin = await assertSameOrigin();
+    if (!authConfigured()) return { error: unavailable };
+    await requestPasswordReset({ email: String(form.get("email") ?? "") }, "public-web", origin);
+    return { sent: true };
+  } catch (error) {
+    if (error instanceof z.ZodError) return { errors: z.flattenError(error).fieldErrors };
+    if (error instanceof AuthenticationError) return { error: error.message };
+    logOperational("request.failed", { code: "RESET_UNAVAILABLE" });
+    return { error: unavailable };
+  }
+}
+export async function completeResetAction(_previous: ResetState, form: FormData): Promise<ResetState> {
+  try {
+    await assertSameOrigin();
+    if (!authConfigured()) return { error: unavailable };
+    await completePasswordReset({ token: String(form.get("token") ?? ""), password: String(form.get("password") ?? ""), confirmPassword: String(form.get("confirmPassword") ?? "") }, "public-web");
+    // Sessions are already gone; drop any cookie this browser still holds.
+    const jar = await cookies();
+    jar.delete(SESSION_COOKIE);
+    jar.delete(CHALLENGE_COOKIE);
+    return { done: true };
+  } catch (error) {
+    if (error instanceof z.ZodError) return { errors: z.flattenError(error).fieldErrors };
+    if (error instanceof AuthenticationError) return { error: error.message };
+    logOperational("request.failed", { code: "RESET_UNAVAILABLE" });
+    return { error: unavailable };
+  }
 }
 export async function signOutAction() {
   await assertSameOrigin();
