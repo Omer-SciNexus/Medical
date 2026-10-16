@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { assertSameOrigin, invitePerson, resendPersonInvitation, resetPersonMfa, revokeAccessGrant, revokePersonInvitation, revokePersonSessions, setPersonActive } from "@/modules/identity";
 import { addAvailabilityTemplate, addScheduleBlackout, extendProviderSchedule, removeAvailabilityTemplate, removeScheduleBlackout } from "@/modules/scheduling";
+import { retryOutboxRow } from "@/platform/outbox";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
 import type { ActionState } from "@/lib/action-state";
@@ -126,4 +127,16 @@ export async function removeBlackoutAction(_previous: ActionState, form: FormDat
   } catch (error) { return toActionState(error); }
   revalidatePath(SCHEDULE);
   return { ok: true };
+}
+
+/** Puts a dead letter back for another pass. The worker picks it up on its next dispatch. */
+export async function retryOutboxAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["admin"]);
+    const row = await retryOutboxRow(actor.clinicId, field(form, "outboxId"));
+    if (!row) return { ok: false, code: "state", error: "That event is no longer waiting to be delivered." };
+    revalidatePath("/admin/outbox");
+    return { ok: true, notice: `${row.topic} is queued for another attempt.` };
+  } catch (error) { return toActionState(error); }
 }

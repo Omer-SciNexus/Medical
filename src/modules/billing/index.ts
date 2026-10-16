@@ -1,2 +1,2 @@
-export { chargeEncounter, getEncounterCharge } from "./service";
+export { chargeEncounter, getEncounterCharge, findChargeForNotification } from "./service";
 export type { ChargeInput } from "./repository";

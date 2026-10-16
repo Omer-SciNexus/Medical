@@ -1,6 +1,6 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
-import type { Transaction } from "@/platform/db";
+import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, type Actor } from "@/modules/identity";
 import { charges } from "./schema";
 
@@ -18,6 +18,12 @@ export async function recordCharge(tx: Transaction, actor: Actor, input: ChargeI
 }
 export async function findChargeForEncounter(tx: Transaction, clinicId: string, encounterId: string) {
   const [charge] = await tx.select({ id: charges.id, amountMinor: charges.amountMinor, currency: charges.currency, status: charges.status, description: charges.description })
+    .from(charges).where(and(eq(charges.encounterId, encounterId), eq(charges.clinicId, clinicId))).limit(1);
+  return charge;
+}
+/** System-level read for the notification worker, which has no actor and no transaction. */
+export async function findChargeOutsideTransaction(clinicId: string, encounterId: string) {
+  const [charge] = await getDb().select({ id: charges.id, amountMinor: charges.amountMinor, currency: charges.currency, status: charges.status })
     .from(charges).where(and(eq(charges.encounterId, encounterId), eq(charges.clinicId, clinicId))).limit(1);
   return charge;
 }

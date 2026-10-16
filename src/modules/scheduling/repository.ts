@@ -3,6 +3,7 @@ import { and, asc, eq, gt, gte, isNull, lt, ne, notExists, sql } from "drizzle-o
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, grantWorkflowAccess, type Actor } from "@/modules/identity";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
+import { enqueueOutbox } from "@/platform/outbox";
 import { appointments, availabilitySlots, availabilityTemplates, patients, scheduleBlackouts } from "./schema";
 import { SlotUnavailableError, StaleAppointmentError, type AppointmentStatus } from "./validators";
 
@@ -36,6 +37,8 @@ export async function claimSlot(actor: Actor, patientId: string, input: { slotId
       // Booking is what gives the provider scheduling authority over this patient. Without it
       // the patient would appear in a queue whose owner is then denied every read.
       await grantWorkflowAccess(tx, { clinicId: actor.clinicId, actorId: input.providerId, patientId, purposes: ["scheduling"], grantedBy: actor.id, reason: "Appointment booked with this provider" });
+      // Reminders are scheduled by a worker reading this row, not inside the booking request.
+      await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.booked", resourceId: appointment.id });
       return appointment;
     }));
   } catch (error) {
@@ -61,6 +64,7 @@ export async function moveAppointmentToSlot(actor: Actor, input: { appointmentId
           eq(appointments.revision, input.revision), eq(appointments.status, "booked"), isNull(appointments.deletedAt)))
         .returning({ id: appointments.id, revision: appointments.revision, slotId: appointments.slotId });
       if (!moved) throw new StaleAppointmentError();
+      await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.rescheduled", resourceId: input.appointmentId, uniqueBy: `appointment.rescheduled:${input.appointmentId}:${moved.revision}` });
       return moved;
     }));
   } catch (error) {
@@ -113,6 +117,25 @@ export async function listWaitingRoom(clinicId: string, from: Date, to: Date) {
     .where(and(eq(appointments.clinicId, clinicId), isNull(appointments.deletedAt), gte(availabilitySlots.startsAt, from), lt(availabilitySlots.startsAt, to)))
     .orderBy(asc(availabilitySlots.startsAt)).limit(200);
 }
+/**
+ * System-level read for the worker: no actor, and nothing clinical. A reminder needs the time,
+ * the state and what to bring, and the worker has no person on whose behalf to be authorized.
+ */
+export async function findReminderTarget(appointmentId: string) {
+  const [appointment] = await getDb().select({ id: appointments.id, clinicId: appointments.clinicId, patientId: appointments.patientId,
+    status: appointments.status, preparation: appointments.preparation, startsAt: availabilitySlots.startsAt })
+    .from(appointments).innerJoin(availabilitySlots, and(eq(appointments.slotId, availabilitySlots.id), eq(appointments.clinicId, availabilitySlots.clinicId)))
+    .where(and(eq(appointments.id, appointmentId), isNull(appointments.deletedAt))).limit(1);
+  return appointment;
+}
+export async function listReminderWindow(hoursAhead: number) {
+  const now = new Date();
+  return getDb().select({ id: appointments.id })
+    .from(appointments).innerJoin(availabilitySlots, and(eq(appointments.slotId, availabilitySlots.id), eq(appointments.clinicId, availabilitySlots.clinicId)))
+    .where(and(isNull(appointments.deletedAt), eq(appointments.status, "booked"),
+      gte(availabilitySlots.startsAt, now), lt(availabilitySlots.startsAt, new Date(now.getTime() + hoursAhead * 3_600_000))))
+    .orderBy(asc(availabilitySlots.startsAt)).limit(500);
+}
 export async function findAppointment(clinicId: string, appointmentId: string) {
   const [appointment] = await getDb().select({ id: appointments.id, patientId: appointments.patientId, reason: appointments.reason, status: appointments.status, revision: appointments.revision,
     startsAt: availabilitySlots.startsAt, providerId: availabilitySlots.providerId })
@@ -128,6 +151,9 @@ export async function transitionAppointment(actor: Actor, input: { appointmentId
         eq(appointments.revision, input.revision), isNull(appointments.deletedAt)))
       .returning({ id: appointments.id, revision: appointments.revision });
     if (!updated) throw new StaleAppointmentError();
+    if (input.status === "cancelled" || input.status === "no_show") {
+      await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.cancelled", resourceId: input.appointmentId });
+    }
     // Arrival is when the chart opens. Authority to read, document and prescribe begins with
     // the patient physically here, commits with the check-in itself, and stays revocable.
     if (input.status === "checked_in") {

@@ -260,6 +260,16 @@ export async function listPatientPrescriptions(clinicId: string, patientId: stri
     .where(and(eq(prescriptions.clinicId, clinicId), eq(prescriptions.patientId, patientId), isNull(prescriptions.deletedAt)))
     .orderBy(desc(prescriptions.createdAt)).limit(50);
 }
+/**
+ * System-level read for the notification worker: whether this visit's summary is published and
+ * which patient it belongs to. The summary text itself is not returned, because the message
+ * only ever says that one is ready.
+ */
+export async function findPublishedSummaryState(clinicId: string, encounterId: string) {
+  const [encounter] = await getDb().select({ id: encounters.id, patientId: encounters.patientId, publishedAt: encounters.publishedAt, status: encounters.status })
+    .from(encounters).where(and(eq(encounters.id, encounterId), eq(encounters.clinicId, clinicId), isNull(encounters.deletedAt))).limit(1);
+  return encounter;
+}
 export async function countPatientObservations(clinicId: string, patientId: string) {
   const [row] = await getDb().select({ total: sql<number>`count(*)::int` }).from(observations)
     .where(and(eq(observations.clinicId, clinicId), eq(observations.patientId, patientId), isNull(observations.deletedAt)));

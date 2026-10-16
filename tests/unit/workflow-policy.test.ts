@@ -126,14 +126,19 @@ describe("note and encounter state", () => {
 });
 
 describe("outbox idempotency keys", () => {
+  const encounter = "encounter.completed:00000000-0000-4000-8000-000000000500";
   it("derives the same key for the same event and different keys across events", () => {
-    const first = outboxKey("encounter.completed", "00000000-0000-4000-8000-000000000500");
-    expect(first).toBe(outboxKey("encounter.completed", "00000000-0000-4000-8000-000000000500"));
-    expect(first).not.toBe(outboxKey("visit_summary.published", "00000000-0000-4000-8000-000000000500"));
-    expect(first).not.toBe(outboxKey("encounter.completed", "00000000-0000-4000-8000-000000000501"));
+    const first = outboxKey(encounter);
+    expect(first).toBe(outboxKey(encounter));
+    expect(first).not.toBe(outboxKey("visit_summary.published:00000000-0000-4000-8000-000000000500"));
+    expect(first).not.toBe(outboxKey("encounter.completed:00000000-0000-4000-8000-000000000501"));
+  });
+  it("separates occurrences of an event that may legitimately recur for one resource", () => {
+    const appointment = "appointment.rescheduled:00000000-0000-4000-8000-000000000406";
+    expect(outboxKey(`${appointment}:2`)).not.toBe(outboxKey(`${appointment}:3`));
+    expect(outboxKey(`${appointment}:2`)).toBe(outboxKey(`${appointment}:2`));
   });
   it("produces a valid UUID so the unique index accepts it", () => {
-    expect(outboxKey("encounter.completed", "00000000-0000-4000-8000-000000000500"))
-      .toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(outboxKey(encounter)).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 });

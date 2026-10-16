@@ -83,6 +83,20 @@ export async function recordScopedEvent(inputActor: Actor, event: { action: stri
   const actor = actorSchema.parse(inputActor);
   await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, patientId: event.patientId ?? null, action: event.action, purpose: event.purpose, outcome: "allowed", resourceId: event.resourceId, reason: event.reason }, tx);
 }
+/**
+ * Audit for work no person asked for. The actor is null because the system did it, which is a
+ * state the log already allows and is more honest than attributing it to whoever happened to
+ * trigger the event hours earlier.
+ */
+export async function recordSystemEvent(event: { clinicId: string; patientId?: string; action: string; purpose: string; resourceId?: string; reason?: string }) {
+  await appendAudit({ clinicId: z.uuid().parse(event.clinicId), actorId: null, patientId: event.patientId ?? null,
+    action: event.action, purpose: event.purpose, outcome: "allowed", resourceId: event.resourceId, reason: event.reason });
+}
+/** The address a notification goes to, if this patient has claimed a portal account. */
+export async function findPortalContact(clinicId: string, patientId: string) {
+  const account = await findPortalAccount(z.uuid().parse(clinicId), z.uuid().parse(patientId));
+  return account?.active ? { email: account.email } : undefined;
+}
 export async function listCareProviders(inputActor: Actor) {
   const actor = actorSchema.parse(inputActor);
   if (!await currentActorIsValid(actor)) throw new AccessDeniedError();

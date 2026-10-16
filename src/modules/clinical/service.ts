@@ -6,7 +6,7 @@ import { allergySchema, amendNoteSchema, completeEncounterSchema, draftRequestSc
 import { draftVisitNote } from "./assist";
 import { checkPrescribingSafety, safetyProviderIsFixture, safetyProviderName, FIXTURE_SOURCE } from "./safety";
 import { observationSeverity, patientAge, vitalByKey } from "./policy";
-import { amendNoteVersion, cancelPrescriptionRow, completeEncounter, findChargeSummary, findCurrentNote, findEncounter, findMedication, findPrescription, insertAllergy, insertObservations, insertPrescription, insertProblem, issuePrescriptionRow, listChartVisits, listEncounterPrescriptions, listNoteHistory, listPatientEncounters, listPatientPrescriptions, openEncounter, readChart, readPublishedSummary, recordSafetyCheck, saveNoteVersion, searchMedications, setProblemStatus, signNoteVersion } from "./repository";
+import { amendNoteVersion, cancelPrescriptionRow, completeEncounter, findChargeSummary, findCurrentNote, findEncounter, findMedication, findPrescription, insertAllergy, insertObservations, insertPrescription, insertProblem, issuePrescriptionRow, findPublishedSummaryState, listChartVisits, listEncounterPrescriptions, listNoteHistory, listPatientEncounters, listPatientPrescriptions, openEncounter, readChart, readPublishedSummary, recordSafetyCheck, saveNoteVersion, searchMedications, setProblemStatus, signNoteVersion } from "./repository";
 
 function requireClinician(actor: Actor) {
   if (actor.role !== "clinician" || !actor.mfaVerified) throw new EncounterStateError("Only a verified clinician may change a visit record.");
@@ -182,6 +182,10 @@ export async function getPatientChartView(actor: Actor, patientId: string) {
     getPatientIdentity(actor, id), readChart(actor, id), listChartVisits(actor, id), listPatientPrescriptions(actor.clinicId, id),
   ]);
   return { patient: { ...patient, age: patientAge(patient.birthDate) }, chart, visits, prescriptions };
+}
+/** Read by the worker, which has no actor: it reports only that a summary exists to read. */
+export async function readSummaryForNotification(clinicId: string, encounterId: string) {
+  return findPublishedSummaryState(z.uuid().parse(clinicId), z.uuid().parse(encounterId));
 }
 export async function finishEncounter(actor: Actor, input: unknown) {
   requireClinician(actor);

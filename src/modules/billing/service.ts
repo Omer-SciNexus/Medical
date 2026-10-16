@@ -2,7 +2,7 @@ import "server-only";
 import { z } from "zod";
 import type { Transaction } from "@/platform/db";
 import type { Actor } from "@/modules/identity";
-import { findChargeForEncounter, recordCharge, type ChargeInput } from "./repository";
+import { findChargeForEncounter, findChargeOutsideTransaction, recordCharge, type ChargeInput } from "./repository";
 
 const chargeSchema = z.object({
   patientId: z.uuid(), encounterId: z.uuid(),
@@ -15,4 +15,7 @@ export async function chargeEncounter(tx: Transaction, actor: Actor, input: Char
 }
 export async function getEncounterCharge(tx: Transaction, clinicId: string, encounterId: string) {
   return findChargeForEncounter(tx, z.uuid().parse(clinicId), z.uuid().parse(encounterId));
+}
+export async function findChargeForNotification(clinicId: string, encounterId: string) {
+  return findChargeOutsideTransaction(z.uuid().parse(clinicId), z.uuid().parse(encounterId));
 }

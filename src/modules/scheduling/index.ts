@@ -3,6 +3,7 @@ export { getScheduleAuthoring, addAvailabilityTemplate, removeAvailabilityTempla
 export { registerPatient, searchPatients } from "./service";
 export { reschedulePatientAppointment, listMyAppointmentOptions } from "./service";
 export { getWaitingRoomBoard } from "./service";
+export { findReminderTarget, listReminderWindow } from "./repository";
 export { SlotUnavailableError, StaleAppointmentError, ScheduleAuthoringError, PatientRegistrationError, appointmentStatusSchema, bookingSchema, transitionSchema } from "./validators";
 export { waitingMinutes, canTransition, roleMayTransition } from "./policy";
 export type { AppointmentStatus } from "./validators";
