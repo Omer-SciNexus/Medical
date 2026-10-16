@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { assertSameOrigin } from "@/modules/identity";
+import { assertSameOrigin, requestBreakGlass } from "@/modules/identity";
 import { advanceAppointment, getAppointmentForCare } from "@/modules/scheduling";
 import { addProblem, amendNote, AssistUnavailableError, cancelPrescription, changeProblemStatus, checkPrescription, draftNoteText, draftPrescription, findMedications, finishEncounter, getPatientChart, issuePrescription, recordAllergy, recordVitals, saveNote, signNote, startEncounter } from "@/modules/clinical";
 import { requireActor } from "@/app/session";
@@ -194,6 +194,21 @@ export async function cancelPrescriptionAction(_previous: ActionState, form: For
     await cancelPrescription(actor, { prescriptionId: String(form.get("prescriptionId") ?? "") });
   } catch (error) { return toActionState(error); }
   revalidatePath(`/clinical/encounters/${encounterId}/prescribe`);
+  return { ok: true };
+}
+/**
+ * The only way into requestBreakGlass. The service does the real gatekeeping: clinician role, a
+ * fresh authenticator check that a recovery code does not satisfy, and a reason worth reading.
+ */
+export async function breakGlassAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const patientId = String(form.get("patientId") ?? "");
+  const values = { reason: String(form.get("reason") ?? "") };
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    await requestBreakGlass(actor, { patientId, reason: values.reason });
+  } catch (error) { return toActionState(error, values); }
+  revalidatePath(`/clinical/patients/${patientId}`);
   return { ok: true };
 }
 export async function completeVisitAction(_previous: ActionState, form: FormData): Promise<ActionState> {

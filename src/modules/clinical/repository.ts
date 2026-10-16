@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, type Actor } from "@/modules/identity";
 import { completeAppointmentInTransaction } from "@/modules/scheduling";
@@ -235,6 +235,30 @@ export async function listPatientEncounters(actor: Actor, patientId: string) {
     tx.select({ id: encounters.id, status: encounters.status, publishedAt: encounters.publishedAt, completedAt: encounters.completedAt, createdAt: encounters.createdAt })
       .from(encounters).where(and(eq(encounters.clinicId, actor.clinicId), eq(encounters.patientId, patientId), isNull(encounters.deletedAt)))
       .orderBy(desc(encounters.createdAt)).limit(25)));
+}
+/** Prior visits with their signed note and amendment trail, for the chart view. */
+export async function listChartVisits(actor: Actor, patientId: string) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "clinical.read", "clinical.chart_visits_read", async () => {
+    const visits = await tx.select({ id: encounters.id, status: encounters.status, clinicianId: encounters.clinicianId, summary: encounters.summary,
+      publishedAt: encounters.publishedAt, completedAt: encounters.completedAt, createdAt: encounters.createdAt })
+      .from(encounters).where(and(eq(encounters.clinicId, actor.clinicId), eq(encounters.patientId, patientId), isNull(encounters.deletedAt)))
+      .orderBy(desc(encounters.createdAt)).limit(20);
+    if (!visits.length) return [];
+    const notes = await tx.select({ encounterId: noteVersions.encounterId, id: noteVersions.id, version: noteVersions.version, status: noteVersions.status,
+      content: noteVersions.content, amendmentReason: noteVersions.amendmentReason, signedAt: noteVersions.signedAt, signedBy: noteVersions.signedBy })
+      .from(noteVersions).where(and(eq(noteVersions.clinicId, actor.clinicId), eq(noteVersions.patientId, patientId), isNull(noteVersions.deletedAt),
+        inArray(noteVersions.encounterId, visits.map((visit) => visit.id))))
+      .orderBy(asc(noteVersions.version)).limit(200);
+    return visits.map((visit) => ({ ...visit, notes: notes.filter((note) => note.encounterId === visit.id) }));
+  }));
+}
+export async function listPatientPrescriptions(clinicId: string, patientId: string) {
+  return getDb().select({ id: prescriptions.id, name: medications.name, strength: medications.strength, dose: prescriptions.dose, unit: prescriptions.unit,
+    route: prescriptions.route, frequency: prescriptions.frequency, durationDays: prescriptions.durationDays, status: prescriptions.status,
+    safetyStatus: prescriptions.safetyStatus, issuedAt: prescriptions.issuedAt, createdAt: prescriptions.createdAt })
+    .from(prescriptions).innerJoin(medications, eq(prescriptions.medicationId, medications.id))
+    .where(and(eq(prescriptions.clinicId, clinicId), eq(prescriptions.patientId, patientId), isNull(prescriptions.deletedAt)))
+    .orderBy(desc(prescriptions.createdAt)).limit(50);
 }
 export async function countPatientObservations(clinicId: string, patientId: string) {
   const [row] = await getDb().select({ total: sql<number>`count(*)::int` }).from(observations)

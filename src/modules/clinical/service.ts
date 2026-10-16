@@ -6,7 +6,7 @@ import { allergySchema, amendNoteSchema, completeEncounterSchema, draftRequestSc
 import { draftVisitNote } from "./assist";
 import { checkPrescribingSafety, safetyProviderIsFixture, safetyProviderName, FIXTURE_SOURCE } from "./safety";
 import { observationSeverity, patientAge, vitalByKey } from "./policy";
-import { amendNoteVersion, cancelPrescriptionRow, completeEncounter, findChargeSummary, findCurrentNote, findEncounter, findMedication, findPrescription, insertAllergy, insertObservations, insertPrescription, insertProblem, issuePrescriptionRow, listEncounterPrescriptions, listNoteHistory, listPatientEncounters, openEncounter, readChart, readPublishedSummary, recordSafetyCheck, saveNoteVersion, searchMedications, setProblemStatus, signNoteVersion } from "./repository";
+import { amendNoteVersion, cancelPrescriptionRow, completeEncounter, findChargeSummary, findCurrentNote, findEncounter, findMedication, findPrescription, insertAllergy, insertObservations, insertPrescription, insertProblem, issuePrescriptionRow, listChartVisits, listEncounterPrescriptions, listNoteHistory, listPatientEncounters, listPatientPrescriptions, openEncounter, readChart, readPublishedSummary, recordSafetyCheck, saveNoteVersion, searchMedications, setProblemStatus, signNoteVersion } from "./repository";
 
 function requireClinician(actor: Actor) {
   if (actor.role !== "clinician" || !actor.mfaVerified) throw new EncounterStateError("Only a verified clinician may change a visit record.");
@@ -170,6 +170,18 @@ async function requirePrescription(actor: Actor, prescriptionId: string) {
   const prescription = await findPrescription(actor.clinicId, prescriptionId);
   if (!prescription) throw new EncounterStateError("This prescription could not be found.");
   return prescription;
+}
+/**
+ * The whole chart for one patient. Each section is read through its own audited operation, so
+ * opening this screen records a chart read exactly as the queue's side panel does.
+ */
+export async function getPatientChartView(actor: Actor, patientId: string) {
+  requireClinician(actor);
+  const id = z.uuid().parse(patientId);
+  const [patient, chart, visits, prescriptions] = await Promise.all([
+    getPatientIdentity(actor, id), readChart(actor, id), listChartVisits(actor, id), listPatientPrescriptions(actor.clinicId, id),
+  ]);
+  return { patient: { ...patient, age: patientAge(patient.birthDate) }, chart, visits, prescriptions };
 }
 export async function finishEncounter(actor: Actor, input: unknown) {
   requireClinician(actor);

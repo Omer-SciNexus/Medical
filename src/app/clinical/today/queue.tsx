@@ -103,6 +103,7 @@ export function Queue({ entries, day, timeZone }: { entries: Entry[]; day: strin
               <p className="context-footnote">Last observed {chart.chart.observations[0] ? clinicalDate(chart.chart.observations[0].observedAt, new Date(), timeZone) : "—"}. Synthetic development data.</p>
             </> : null}
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+            <a className="button button-ghost button-small" href={`/clinical/patients/${selected.patientId}`}>Open the full chart</a>
             {selected.status === "booked" || selected.status === "checked_in" || selected.status === "rooming" ? <form action={moveAppointment}>
               <input type="hidden" name="appointmentId" value={selected.id} /><input type="hidden" name="revision" value={selected.revision} />
               <input type="hidden" name="status" value={selected.status === "booked" ? "checked_in" : selected.status === "checked_in" ? "rooming" : "ready"} />
