@@ -115,6 +115,39 @@ export async function readChart(actor: Actor, patientId: string) {
     return { allergies: allergyRows, problems: problemRows, observations: observationRows };
   }));
 }
+export async function insertObservations(actor: Actor, input: { patientId: string; encounterId: string; rows: { label: string; value: string; unit: string; referenceLow: string | null; referenceHigh: string | null; flag: string }[] }) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "clinical.write", "clinical.observations_recorded", async () => {
+    const observedAt = new Date();
+    const written = await tx.insert(observations)
+      .values(input.rows.map((row) => ({ ...row, observedAt, clinicId: actor.clinicId, patientId: input.patientId, createdBy: actor.id, updatedBy: actor.id })))
+      .returning({ id: observations.id, label: observations.label, flag: observations.flag });
+    return written;
+  }));
+}
+export async function insertProblem(actor: Actor, input: { patientId: string; description: string }) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "clinical.write", "clinical.problem_added", async () => {
+    const [problem] = await tx.insert(problems)
+      .values({ clinicId: actor.clinicId, patientId: input.patientId, description: input.description, createdBy: actor.id, updatedBy: actor.id })
+      .returning({ id: problems.id, description: problems.description, status: problems.status });
+    return problem;
+  }));
+}
+export async function setProblemStatus(actor: Actor, input: { patientId: string; problemId: string; status: "active" | "resolved" }) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "clinical.write", `clinical.problem_${input.status}`, async () => {
+    const [problem] = await tx.update(problems).set({ status: input.status, updatedBy: actor.id })
+      .where(and(eq(problems.id, input.problemId), eq(problems.clinicId, actor.clinicId), eq(problems.patientId, input.patientId), isNull(problems.deletedAt)))
+      .returning({ id: problems.id, status: problems.status });
+    return problem;
+  }));
+}
+export async function insertAllergy(actor: Actor, input: { patientId: string; substance: string; reaction: string; severity: string }) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "clinical.write", "clinical.allergy_recorded", async () => {
+    const [allergy] = await tx.insert(allergies)
+      .values({ clinicId: actor.clinicId, patientId: input.patientId, substance: input.substance, reaction: input.reaction, severity: input.severity, createdBy: actor.id, updatedBy: actor.id })
+      .returning({ id: allergies.id, substance: allergies.substance });
+    return allergy;
+  }));
+}
 export async function readPublishedSummary(actor: Actor, encounterId: string, patientId: string) {
   return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, actor.role === "patient" ? "patient.view" : "clinical.read", "clinical.visit_summary_read", async () => {
     const [summary] = await tx.select({ id: encounters.id, summary: encounters.summary, publishedAt: encounters.publishedAt, completedAt: encounters.completedAt, status: encounters.status })

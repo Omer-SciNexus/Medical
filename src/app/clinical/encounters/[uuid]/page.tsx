@@ -5,11 +5,12 @@ import { AlertTriangle, CheckCircle2, ChevronRight, History, Home, TriangleAlert
 import { AppShell } from "@/components/app/shell";
 import { Badge } from "@/components/ui/primitives";
 import { getClinicSettings } from "@/modules/identity";
-import { assistConfigured, CONSULTATION_FEE_MINOR, getEncounterWorkspace } from "@/modules/clinical";
+import { assistConfigured, CONSULTATION_FEE_MINOR, VITALS, getEncounterWorkspace } from "@/modules/clinical";
 import { clinicalDate, clinicalName } from "@/lib/format";
 import { clinicTimezone } from "@/lib/clinic-day";
 import { requireActor } from "@/app/session";
 import { NoteEditor } from "./note-editor";
+import { ChartEntry } from "./chart-entry";
 
 export const metadata: Metadata = { title: "Visit encounter", robots: { index: false, follow: false } };
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -50,6 +51,15 @@ export default async function EncounterPage({ params }: { params: Promise<{ uuid
           charge={charge ? { amountMinor: charge.amountMinor, currency: charge.currency } : null}
           fee={{ amountMinor: CONSULTATION_FEE_MINOR, currency: clinic?.currency ?? "TRY" }}
           aiEnabled={assistConfigured()}
+        />
+
+        <ChartEntry
+          encounterId={encounter.id}
+          open={encounter.status === "in_progress"}
+          allergyCount={chart.allergies.length}
+          vitals={VITALS.map((vital) => ({ key: vital.key, label: vital.label, unit: vital.unit, low: vital.low, high: vital.high, min: vital.min, max: vital.max, step: vital.step }))}
+          problems={chart.problems}
+          observations={chart.observations.map((observation) => ({ ...observation, observedAt: observation.observedAt.toISOString() }))}
         />
 
         {history.length > 1 ? <section className="note-history">

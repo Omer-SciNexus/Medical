@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { assertSameOrigin } from "@/modules/identity";
 import { advanceAppointment, getAppointmentForCare } from "@/modules/scheduling";
-import { amendNote, AssistUnavailableError, draftNoteText, finishEncounter, getPatientChart, saveNote, signNote, startEncounter } from "@/modules/clinical";
+import { addProblem, amendNote, AssistUnavailableError, changeProblemStatus, draftNoteText, finishEncounter, getPatientChart, recordAllergy, recordVitals, saveNote, signNote, startEncounter } from "@/modules/clinical";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
 import type { ActionState } from "@/lib/action-state";
@@ -94,6 +94,53 @@ export async function draftNoteAction(_previous: ActionState, form: FormData): P
     if (error instanceof AssistUnavailableError) return { ok: false, code: "unavailable", error: error.message };
     return toActionState(error);
   }
+}
+export async function recordVitalsAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const encounterId = String(form.get("encounterId") ?? "");
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    // Only the measurement fields are forwarded; the catalogue decides what each one means.
+    const readings = Object.fromEntries([...form.entries()]
+      .filter(([key, value]) => key.startsWith("vital.") && typeof value === "string")
+      .map(([key, value]) => [key.slice("vital.".length), String(value)]));
+    const written = await recordVitals(actor, { encounterId, readings });
+    revalidatePath(`/clinical/encounters/${encounterId}`);
+    const flagged = written.filter((row) => row.flag !== "normal");
+    return { ok: true, notice: `Recorded ${written.length} ${written.length === 1 ? "measurement" : "measurements"}${flagged.length ? `, ${flagged.length} outside the reference range` : ""}.` };
+  } catch (error) { return toActionState(error); }
+}
+export async function addProblemAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const encounterId = String(form.get("encounterId") ?? "");
+  const values = { description: String(form.get("description") ?? "") };
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    await addProblem(actor, { encounterId, ...values });
+  } catch (error) { return toActionState(error, values); }
+  revalidatePath(`/clinical/encounters/${encounterId}`);
+  return { ok: true };
+}
+export async function changeProblemStatusAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const encounterId = String(form.get("encounterId") ?? "");
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    await changeProblemStatus(actor, { encounterId, problemId: String(form.get("problemId") ?? ""), status: String(form.get("status") ?? "") });
+  } catch (error) { return toActionState(error); }
+  revalidatePath(`/clinical/encounters/${encounterId}`);
+  return { ok: true };
+}
+export async function recordAllergyAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const encounterId = String(form.get("encounterId") ?? "");
+  const values = { substance: String(form.get("substance") ?? ""), reaction: String(form.get("reaction") ?? ""), severity: String(form.get("severity") ?? "") };
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    await recordAllergy(actor, { encounterId, ...values });
+  } catch (error) { return toActionState(error, values); }
+  revalidatePath(`/clinical/encounters/${encounterId}`);
+  return { ok: true };
 }
 export async function completeVisitAction(_previous: ActionState, form: FormData): Promise<ActionState> {
   const encounterId = String(form.get("encounterId") ?? "");

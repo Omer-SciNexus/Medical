@@ -17,6 +17,20 @@ export const completeEncounterSchema = z.object({
   summary: z.string().trim().min(20, "Write a visit summary the patient will read.").max(5_000, "Use no more than 5000 characters."),
 });
 export const draftRequestSchema = z.object({ encounterId: z.uuid(), observations: z.string().trim().max(2_000).default("") });
+// Values arrive as strings from a form; the catalogue's bounds are checked in the service,
+// which is where the reference range for each measurement lives.
+export const vitalsSchema = z.object({
+  encounterId: z.uuid(),
+  readings: z.record(z.string().regex(/^[a-z_]{2,40}$/), z.string().trim()).default({}),
+});
+export const problemSchema = z.object({ encounterId: z.uuid(), description: z.string().trim().min(3, "Describe the problem.").max(200) });
+export const problemStatusSchema = z.object({ encounterId: z.uuid(), problemId: z.uuid(), status: z.enum(["active", "resolved"]) });
+export const allergySchema = z.object({
+  encounterId: z.uuid(),
+  substance: z.string().trim().min(2, "Name the substance.").max(120),
+  reaction: z.string().trim().min(2, "Describe the reaction.").max(200),
+  severity: z.enum(["mild", "moderate", "severe"], { error: "Choose a severity." }),
+});
 
 export class NoteConflictError extends Error {
   constructor() { super("This note was saved elsewhere after you opened it. Reload to continue from the current version."); this.name = "NoteConflictError"; }

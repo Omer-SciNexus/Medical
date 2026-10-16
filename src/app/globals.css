@@ -714,6 +714,16 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 .invite-link { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--line)); background: var(--accent-soft); border-radius: 8px; padding: 13px 16px; margin-bottom: 20px; }
 .invite-link strong { display: block; font-weight: 500; font-size: 12px; }
 .invite-link code { font-size: 11px; color: var(--ink-600); word-break: break-all; }
+.chart-entry { border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 18px 20px; margin-top: 22px; }
+.chart-entry h3 { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; margin-bottom: 14px; }
+.chart-entry h3 svg, .chart-entry h4 svg { width: 14px; height: 14px; color: var(--ink-600); }
+.chart-entry-heading { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 500; margin: 22px 0 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+.vitals-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.problem-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.problem-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; border-bottom: 1px solid var(--line-soft, var(--line)); padding-block: 5px; }
+.inline-form { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.allergy-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+.allergy-form .row-actions { grid-column: 1 / -1; }
 .schedule-form { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .grant-flag { margin-left: 7px; }
 .grant-flag svg { width: 9px; height: 9px; }
@@ -726,6 +736,7 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 
 @media (max-width: 1250px) {
   .encounter-grid { grid-template-columns: minmax(0, 1fr) 240px; gap: 24px; }
+  .vitals-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .booking-form { grid-template-columns: minmax(0, 1fr) 270px; gap: 26px; }
   .audit-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -734,6 +745,8 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 }
 @media (max-width: 800px) {
   .encounter-grid, .booking-form { grid-template-columns: 1fr; }
+  .vitals-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .allergy-form { grid-template-columns: 1fr; }
   .booking-review { grid-column: 1; grid-row: auto; }
   .booking-times { grid-column: 1; }
   .audit-filters { grid-template-columns: 1fr 1fr; }

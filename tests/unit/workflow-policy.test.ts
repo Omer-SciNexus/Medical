@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { canTransition, roleMayTransition, waitingMinutes } from "../../src/modules/scheduling/policy";
 import { isUniqueViolation } from "../../src/platform/errors";
 import { DrizzleQueryError } from "drizzle-orm/errors";
-import { encounterIsCompletable, noteIsEditable, noteIsSignable, observationFlag, patientAge } from "../../src/modules/clinical/policy";
+import { encounterIsCompletable, noteIsEditable, noteIsSignable, observationFlag, observationSeverity, patientAge, VITALS, vitalByKey } from "../../src/modules/clinical/policy";
 import { outboxKey } from "../../src/platform/outbox";
 
 describe("appointment transitions", () => {
@@ -88,6 +88,34 @@ describe("note and encounter state", () => {
     expect(observationFlag(142, 90, 139)).toBe("high");
     expect(observationFlag(84, 90, 139)).toBe("low");
     expect(observationFlag(500, null, null)).toBe("normal");
+  });
+  it("escalates a reading past its critical bound, and keeps the range's own verdict otherwise", () => {
+    const systolic = vitalByKey("systolic")!;
+    expect(observationSeverity(118, systolic)).toBe("normal");
+    expect(observationSeverity(142, systolic)).toBe("high");
+    expect(observationSeverity(84, systolic)).toBe("low");
+    expect(observationSeverity(185, systolic)).toBe("critical");
+    expect(observationSeverity(78, systolic)).toBe("critical");
+    // Oxygen saturation has no upper critical bound, so a high-normal reading stays normal.
+    const oxygen = vitalByKey("oxygen_saturation")!;
+    expect(observationSeverity(100, oxygen)).toBe("normal");
+    expect(observationSeverity(92, oxygen)).toBe("low");
+    expect(observationSeverity(88, oxygen)).toBe("critical");
+    // A measurement with no reference range is never flagged.
+    expect(observationSeverity(500, vitalByKey("weight")!)).toBe("normal");
+  });
+  it("keeps every vital's catalogue entry internally consistent", () => {
+    for (const vital of VITALS) {
+      expect(vital.min).toBeLessThan(vital.max);
+      if (vital.low !== null && vital.high !== null) {
+        expect(vital.low).toBeLessThanOrEqual(vital.high);
+        expect(vital.min).toBeLessThanOrEqual(vital.low);
+        expect(vital.high).toBeLessThanOrEqual(vital.max);
+      }
+      if (vital.criticalLow !== null && vital.low !== null) expect(vital.criticalLow).toBeLessThanOrEqual(vital.low);
+      if (vital.criticalHigh !== null && vital.high !== null) expect(vital.criticalHigh).toBeGreaterThanOrEqual(vital.high);
+    }
+    expect(vitalByKey("not_a_vital")).toBeUndefined();
   });
   it("derives age without rolling over before the birthday", () => {
     expect(patientAge("1984-06-15", new Date("2026-10-14T00:00:00Z"))).toBe(42);
