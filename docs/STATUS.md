@@ -70,6 +70,7 @@ Measured on this host on 16 October 2026:
 | ESLint, including domain boundaries | pass, 0 warnings |
 | Unit tests | 91 / 91 |
 | Integration tests against real PostgreSQL 17.5 | 189 / 189 |
+| Browser tests, including axe on every public page | 30 / 30 |
 | Production build | pass, 29 routes |
 
 Docker Desktop still cannot start on this workstation — its service needs elevation this session
