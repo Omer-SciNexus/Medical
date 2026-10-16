@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthenticationError } from "../../src/modules/identity/errors";
-import { challengeSchema, loginSchema, registrationSchema } from "../../src/modules/identity/validators";
+import { acceptInvitationSchema, challengeSchema, loginSchema, registrationSchema } from "../../src/modules/identity/validators";
 
-const mock = vi.hoisted(() => ({ cookies: new Map<string, string>(), set: vi.fn(), remove: vi.fn(), begin: vi.fn(), register: vi.fn(), finish: vi.fn(), revoke: vi.fn(), setSession: vi.fn(), configured: vi.fn(), sameOrigin: vi.fn(), cookieOptions: vi.fn(), log: vi.fn() }));
+const mock = vi.hoisted(() => ({ cookies: new Map<string, string>(), set: vi.fn(), remove: vi.fn(), begin: vi.fn(), register: vi.fn(), accept: vi.fn(), finish: vi.fn(), revoke: vi.fn(), setSession: vi.fn(), configured: vi.fn(), sameOrigin: vi.fn(), cookieOptions: vi.fn(), log: vi.fn() }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (key: string) => mock.cookies.has(key) ? { value: mock.cookies.get(key) } : undefined, set: mock.set, delete: mock.remove }) }));
 vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw new Error(`REDIRECT:${url}`); } }));
-vi.mock("../../src/modules/identity", () => ({ AuthenticationError, challengeSchema, loginSchema, registrationSchema, SESSION_COOKIE: "meridian_session", beginSignIn: mock.begin, registerWorkspace: mock.register, finishSignIn: mock.finish, revokeSession: mock.revoke, setSessionCookie: mock.setSession, authConfigured: mock.configured, assertSameOrigin: mock.sameOrigin, authCookieOptions: mock.cookieOptions }));
+vi.mock("../../src/modules/identity", () => ({ AuthenticationError, acceptInvitationSchema, challengeSchema, loginSchema, registrationSchema, SESSION_COOKIE: "meridian_session", beginSignIn: mock.begin, registerWorkspace: mock.register, acceptInvitation: mock.accept, finishSignIn: mock.finish, revokeSession: mock.revoke, setSessionCookie: mock.setSession, authConfigured: mock.configured, assertSameOrigin: mock.sameOrigin, authCookieOptions: mock.cookieOptions }));
 vi.mock("../../src/platform/log", () => ({ logOperational: mock.log }));
-import { signInAction, signUpAction, verifyAction, signOutAction } from "../../src/app/(auth)/actions";
+import { acceptInviteAction, signInAction, signUpAction, verifyAction, signOutAction } from "../../src/app/(auth)/actions";
 const credentials = { step: "credentials" as const };
 const password = "A memorable test passphrase";
 function form(data: Record<string, string>) { const value = new FormData(); for (const [key, entry] of Object.entries(data)) value.set(key, entry); return value; }
@@ -58,6 +58,19 @@ describe("authentication action boundary", () => {
     const result = await verifyAction({ step: "enroll_mfa" }, form({ code: " 123456 ", challenge: "client-forged" }));
     expect(mock.finish).toHaveBeenCalledWith({ challenge: "cookie-token", code: "123456" });
     expect(result).toEqual({ step: "recovery_codes", recoveryCodes: ["12345678-ABCDEF12"] }); expect(mock.setSession).toHaveBeenCalledWith("private-token");
+  });
+  it("sends only the token and password when an invitation is accepted, never a role or clinic", async () => {
+    const token = "a".repeat(64);
+    mock.accept.mockResolvedValue({ kind: "enroll_mfa", challenge: "b".repeat(64), provisioningUri: "otpauth://totp/Meridian:test?secret=TESTSECRET&issuer=Meridian" });
+    const result = await acceptInviteAction(credentials, form({ token, password, confirmPassword: password, role: "admin", clinicId: "someone-elses-clinic", email: "forged@example.test" }));
+    expect(mock.accept).toHaveBeenCalledWith({ token, password, confirmPassword: password }, "public-web");
+    expect(result).toEqual({ step: "enroll_mfa", secret: "TESTSECRET" });
+    expect(mock.setSession).not.toHaveBeenCalled();
+  });
+  it("rejects a malformed invitation token before calling account services", async () => {
+    const result = await acceptInviteAction(credentials, form({ token: "short", password, confirmPassword: password }));
+    expect(result.errors?.token).toBeDefined();
+    expect(mock.accept).not.toHaveBeenCalled();
   });
   it("revokes server state before deleting the cookie on sign-out", async () => {
     mock.cookies.set("meridian_session", "old-token");

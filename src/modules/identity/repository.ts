@@ -1,7 +1,7 @@
 import "server-only";
-import { and, asc, desc, eq, gte, isNull, lt, lte, or, gt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt, lte, ne, or, gt, sql } from "drizzle-orm";
 import { getDb, getAuditDb, type Transaction } from "@/platform/db";
-import { auditLog, careRelationships, clinics, users } from "./schema";
+import { auditLog, careRelationships, clinics, invitations, users } from "./schema";
 import type { Actor, AccessPurpose } from "./validators";
 
 export type AuditEvent = {
@@ -89,4 +89,62 @@ export async function consumeRecoveryCode(userId: string, codeHash: string) {
     return user;
   });
   return result;
+}
+// People a clinic's administrator can see and manage. Patient-linked accounts are managed
+// through patient registration, not this list.
+export async function listClinicPeople(clinicId: string) {
+  return getDb().select({ id: users.id, email: users.email, displayName: users.displayName, role: users.role, active: users.active, hasMfa: sql<boolean>`${users.mfaSecret} IS NOT NULL`, createdAt: users.createdAt })
+    .from(users).where(and(eq(users.clinicId, clinicId), ne(users.role, "patient"))).orderBy(asc(users.displayName)).limit(500);
+}
+export async function findClinicUser(clinicId: string, userId: string, tx?: Transaction) {
+  const [user] = await (tx ?? getDb()).select().from(users).where(and(eq(users.id, userId), eq(users.clinicId, clinicId))).limit(1);
+  return user;
+}
+export async function setUserActive(clinicId: string, userId: string, active: boolean, updatedBy: string) {
+  const [user] = await getDb().update(users).set({ active, updatedAt: new Date() }).where(and(eq(users.id, userId), eq(users.clinicId, clinicId))).returning();
+  if (user) await appendAudit({ clinicId, actorId: updatedBy, action: active ? "identity.person_reactivated" : "identity.person_deactivated", purpose: "administration", outcome: "allowed", resourceId: userId });
+  return user;
+}
+export async function clearMfaEnrollment(clinicId: string, userId: string, updatedBy: string) {
+  const [user] = await getDb().update(users).set({ mfaSecret: null, recoveryHashes: [], updatedAt: new Date() }).where(and(eq(users.id, userId), eq(users.clinicId, clinicId))).returning();
+  if (user) await appendAudit({ clinicId, actorId: updatedBy, action: "identity.mfa_reset", purpose: "administration", outcome: "allowed", resourceId: userId });
+  return user;
+}
+export async function createInvitation(input: { clinicId: string; email: string; displayName: string; role: "clinician" | "staff"; tokenHash: string; invitedBy: string; expiresAt: Date }) {
+  const [invitation] = await getDb().insert(invitations).values(input).returning({ id: invitations.id, expiresAt: invitations.expiresAt });
+  await appendAudit({ clinicId: input.clinicId, actorId: input.invitedBy, action: "identity.invitation_created", purpose: "administration", outcome: "allowed", resourceId: invitation.id });
+  return invitation;
+}
+export async function listInvitations(clinicId: string) {
+  return getDb().select({ id: invitations.id, email: invitations.email, displayName: invitations.displayName, role: invitations.role,
+    createdAt: invitations.createdAt, expiresAt: invitations.expiresAt, consumedAt: invitations.consumedAt, revokedAt: invitations.revokedAt })
+    .from(invitations).where(eq(invitations.clinicId, clinicId)).orderBy(desc(invitations.createdAt)).limit(200);
+}
+const pendingInvitation = (clinicId: string, invitationId: string) =>
+  and(eq(invitations.id, invitationId), eq(invitations.clinicId, clinicId), isNull(invitations.consumedAt), isNull(invitations.revokedAt));
+export async function revokeInvitation(clinicId: string, invitationId: string, revokedBy: string) {
+  const [invitation] = await getDb().update(invitations).set({ revokedAt: new Date() }).where(pendingInvitation(clinicId, invitationId)).returning({ id: invitations.id });
+  if (invitation) await appendAudit({ clinicId, actorId: revokedBy, action: "identity.invitation_revoked", purpose: "administration", outcome: "allowed", resourceId: invitationId });
+  return invitation;
+}
+export async function rotateInvitation(clinicId: string, invitationId: string, tokenHash: string, expiresAt: Date, resentBy: string) {
+  const [invitation] = await getDb().update(invitations).set({ tokenHash, expiresAt }).where(pendingInvitation(clinicId, invitationId)).returning({ id: invitations.id, email: invitations.email });
+  if (invitation) await appendAudit({ clinicId, actorId: resentBy, action: "identity.invitation_resent", purpose: "administration", outcome: "allowed", resourceId: invitationId });
+  return invitation;
+}
+export async function findInvitationByTokenHash(tokenHash: string) {
+  const [invitation] = await getDb().select().from(invitations).where(and(eq(invitations.tokenHash, tokenHash), isNull(invitations.consumedAt), isNull(invitations.revokedAt), gt(invitations.expiresAt, new Date()))).limit(1);
+  return invitation;
+}
+// Consumes the invitation and creates the account in one transaction, so a token can never
+// back two accounts and a crash mid-way can never leave a consumed invitation without a user.
+export async function consumeInvitation(invitationId: string, input: { clinicId: string; email: string; displayName: string; role: "clinician" | "staff"; passwordHash: string }) {
+  return getDb().transaction(async (tx) => {
+    const [consumed] = await tx.update(invitations).set({ consumedAt: new Date() })
+      .where(and(eq(invitations.id, invitationId), isNull(invitations.consumedAt), isNull(invitations.revokedAt), gt(invitations.expiresAt, new Date()))).returning({ id: invitations.id });
+    if (!consumed) return undefined;
+    const [user] = await tx.insert(users).values({ clinicId: input.clinicId, email: input.email, displayName: input.displayName, role: input.role, passwordHash: input.passwordHash, patientId: null }).returning();
+    await appendAudit({ clinicId: input.clinicId, actorId: user.id, action: "identity.invitation_accepted", purpose: "administration", outcome: "allowed", resourceId: invitationId }, tx);
+    return user;
+  });
 }

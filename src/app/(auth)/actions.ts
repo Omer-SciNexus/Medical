@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { AuthenticationError, assertSameOrigin, authConfigured, authCookieOptions, beginSignIn, finishSignIn, registerWorkspace, revokeSession, SESSION_COOKIE, setSessionCookie } from "@/modules/identity";
+import { AuthenticationError, acceptInvitation, assertSameOrigin, authConfigured, authCookieOptions, beginSignIn, finishSignIn, registerWorkspace, revokeSession, SESSION_COOKIE, setSessionCookie } from "@/modules/identity";
 import type { AuthFormState } from "@/lib/auth-form-state";
 import { logOperational } from "@/platform/log";
 
@@ -30,16 +30,19 @@ function failure(error: unknown, step: AuthFormState["step"]): AuthFormState {
   logOperational("request.failed", { code: "AUTH_UNAVAILABLE" });
   return { step, error: unavailable };
 }
-async function credentialsAction(form: FormData, mode: "sign-in" | "sign-up"): Promise<AuthFormState> {
+async function credentialsAction(form: FormData, mode: "sign-in" | "sign-up" | "accept-invite"): Promise<AuthFormState> {
   let state: AuthFormState | null;
   try {
     await assertSameOrigin();
     // Validate before checking deployment configuration, so field feedback remains useful.
-    const { loginSchema, registrationSchema } = await import("@/modules/identity");
-    const data = (mode === "sign-up" ? registrationSchema : loginSchema).parse(Object.fromEntries(form));
+    const { loginSchema, registrationSchema, acceptInvitationSchema } = await import("@/modules/identity");
+    const schema = mode === "sign-up" ? registrationSchema : mode === "accept-invite" ? acceptInvitationSchema : loginSchema;
+    const data = schema.parse(Object.fromEntries(form));
     if (!authConfigured()) return { step: "credentials", error: unavailable };
     // Conservative shared bucket; never trust a client-supplied forwarding header for rate limits.
-    const result = mode === "sign-up" ? await registerWorkspace(data, "public-web") : await beginSignIn(data, "public-web");
+    const result = mode === "sign-up" ? await registerWorkspace(data, "public-web")
+      : mode === "accept-invite" ? await acceptInvitation(data, "public-web")
+      : await beginSignIn(data, "public-web");
     state = await acceptResult(result);
   } catch (error) { return failure(error, "credentials"); }
   if (state) return state;
@@ -47,6 +50,7 @@ async function credentialsAction(form: FormData, mode: "sign-in" | "sign-up"): P
 }
 export async function signInAction(_previous: AuthFormState, form: FormData) { return credentialsAction(form, "sign-in"); }
 export async function signUpAction(_previous: AuthFormState, form: FormData) { return credentialsAction(form, "sign-up"); }
+export async function acceptInviteAction(_previous: AuthFormState, form: FormData) { return credentialsAction(form, "accept-invite"); }
 export async function verifyAction(previous: AuthFormState, form: FormData): Promise<AuthFormState> {
   let state: AuthFormState | null;
   const step = previous.step === "enroll_mfa" ? "enroll_mfa" : "verify_mfa";

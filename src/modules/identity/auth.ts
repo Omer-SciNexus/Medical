@@ -4,9 +4,9 @@ import { z } from "zod";
 import { getRedis } from "@/platform/redis";
 import { isUniqueViolation } from "@/platform/errors";
 import { hashPassword, verifyPassword, digest, encryptSecret, decryptSecret, newToken, newRecoveryCodes } from "./crypto";
-import { findUserByEmail, findUserById, appendAudit, enrollMfa, consumeRecoveryCode, createClinicOwner } from "./repository";
+import { findUserByEmail, findUserById, appendAudit, enrollMfa, consumeRecoveryCode, createClinicOwner, consumeInvitation, findInvitationByTokenHash } from "./repository";
 import { createSession } from "./sessions";
-import { loginSchema, challengeSchema, registrationSchema, type Actor } from "./validators";
+import { acceptInvitationSchema, loginSchema, challengeSchema, registrationSchema, type Actor } from "./validators";
 import { AuthenticationError } from "./errors";
 
 const challengeData = z.object({ userId: z.uuid(), authenticatedAt: z.number(), secret: z.string().optional() });
@@ -47,6 +47,32 @@ export async function registerWorkspace(input: unknown, trustedClientAddress: st
     throw error;
   }
   return beginChallenge(user);
+}
+// The invitation is the only source of clinic and role here. Nothing the caller sends can
+// choose either, which is the same rule public registration follows.
+export async function acceptInvitation(input: unknown, trustedClientAddress: string) {
+  const data = acceptInvitationSchema.parse(input);
+  await throttle("invitation_address", trustedClientAddress, 20);
+  await throttle("invitation_token", data.token, 6);
+  const invitation = await findInvitationByTokenHash(digest(data.token));
+  if (!invitation || invitation.role === "patient" || invitation.role === "admin") throw new AuthenticationError("This invitation link is no longer valid. Ask your administrator to send a new one.");
+  const passwordHash = await hashPassword(data.password);
+  let user: Awaited<ReturnType<typeof consumeInvitation>>;
+  try {
+    user = await consumeInvitation(invitation.id, { clinicId: invitation.clinicId, email: invitation.email, displayName: invitation.displayName, role: invitation.role, passwordHash });
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new AuthenticationError("An account already exists for that email address. Sign in instead.");
+    throw error;
+  }
+  if (!user) throw new AuthenticationError("This invitation link has already been used.");
+  return beginChallenge(user);
+}
+export async function describeInvitation(token: string) {
+  const parsed = z.string().regex(/^[a-f0-9]{64}$/).safeParse(token);
+  if (!parsed.success) return null;
+  const invitation = await findInvitationByTokenHash(digest(parsed.data));
+  if (!invitation || invitation.role === "patient" || invitation.role === "admin") return null;
+  return { displayName: invitation.displayName, email: invitation.email, role: invitation.role, expiresAt: invitation.expiresAt };
 }
 async function beginChallenge(user: NonNullable<Awaited<ReturnType<typeof findUserById>>>) {
   const authenticatedAt = Date.now();

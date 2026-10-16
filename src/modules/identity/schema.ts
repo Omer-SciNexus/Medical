@@ -43,6 +43,22 @@ export const careRelationships = pgTable("care_relationships", {
 }, (t) => [index("care_access_lookup").on(t.clinicId, t.actorId, t.patientId, t.purpose),
   check("emergency_requires_reason_expiry", sql`NOT ${t.emergency} OR (${t.reason} IS NOT NULL AND length(${t.reason}) >= 20 AND ${t.expiresAt} IS NOT NULL)`)]);
 
+export const invitations = pgTable("invitations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  clinicId: uuid("clinic_id").notNull().references(() => clinics.id),
+  email: text("email").notNull(),
+  displayName: text("display_name").notNull(),
+  role: roleEnum("role").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  invitedBy: uuid("invited_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("invitation_token_unique").on(t.tokenHash), index("invitation_clinic_lookup").on(t.clinicId, t.createdAt),
+  uniqueIndex("invitation_pending_email").on(t.clinicId, t.email).where(sql`${t.consumedAt} IS NULL AND ${t.revokedAt} IS NULL`),
+  check("invitation_role", sql`${t.role} IN ('clinician', 'staff')`)]);
+
 export const auditLog = pgTable("audit_log", {
   id: uuid("id").defaultRandom().primaryKey(),
   clinicId: uuid("clinic_id"),

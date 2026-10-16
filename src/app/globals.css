@@ -708,6 +708,16 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 .audit-filter-actions { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; }
 .audit-table td { font-size: 11px; }
 .audit-table td svg { width: 11px; height: 11px; vertical-align: -1px; color: var(--ink-400); }
+.admin-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: end; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 18px 20px; margin-bottom: 18px; }
+.admin-form-actions { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.invite-link { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--line)); background: var(--accent-soft); border-radius: 8px; padding: 13px 16px; margin-bottom: 20px; }
+.invite-link strong { display: block; font-weight: 500; font-size: 12px; }
+.invite-link code { font-size: 11px; color: var(--ink-600); word-break: break-all; }
+.auth-invitation { display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 4px; }
+.auth-invitation div { display: flex; justify-content: space-between; gap: 14px; font-size: 13px; }
+.auth-invitation dt { color: var(--ink-600); }
+.auth-invitation dd { font-weight: 500; }
 
 @media (max-width: 1250px) {
   .encounter-grid { grid-template-columns: minmax(0, 1fr) 240px; gap: 24px; }

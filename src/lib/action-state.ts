@@ -10,5 +10,8 @@ export type ActionState = {
   revision?: number;
   savedAt?: number;
   draft?: string;
+  /** A single-use link returned to the authorized caller, shown once and never stored. */
+  link?: string;
+  delivered?: boolean;
 };
 export const idleAction: ActionState = {};
