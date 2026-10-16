@@ -64,6 +64,13 @@
       "when": 1792114872724,
       "tag": "0008_credential_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792116673042,
+      "tag": "0009_prescribing",
+      "breakpoints": true
     }
   ]
 }

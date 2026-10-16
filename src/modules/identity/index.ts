@@ -7,6 +7,7 @@ export { beginSignIn, finishSignIn, registerWorkspace, acceptInvitation, describ
 export { requestPasswordReset, completePasswordReset, confirmEmailVerification, resendOwnVerification, emailVerificationState, restartMfaEnrollment, reissueRecoveryCodes } from "./auth";
 export { resolveSession, revokeSession, revokeAllSessions, SESSION_COOKIE } from "./sessions";
 export { assertSameOrigin, authCookieOptions, setSessionCookie, authConfigured } from "./http";
+export { hasFreshTotp } from "./policy";
 export { AuthenticationError } from "./errors";
 export { loginSchema, registrationSchema, challengeSchema, acceptInvitationSchema, passwordResetSchema, resetRequestSchema } from "./validators";
 export { findAccountSummary } from "./repository";

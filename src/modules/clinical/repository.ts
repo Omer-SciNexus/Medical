@@ -1,11 +1,11 @@
 import "server-only";
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, type Actor } from "@/modules/identity";
 import { completeAppointmentInTransaction } from "@/modules/scheduling";
 import { chargeEncounter, getEncounterCharge } from "@/modules/billing";
 import { enqueueOutbox } from "@/platform/outbox";
-import { allergies, encounters, noteVersions, observations, problems } from "./schema";
+import { allergies, encounters, medications, noteVersions, observations, prescriptions, problems } from "./schema";
 import { CONSULTATION_FEE_MINOR, SOAP_TEMPLATE, encounterIsCompletable } from "./policy";
 import { EncounterStateError, NoteConflictError, type NoteStatus } from "./validators";
 
@@ -146,6 +146,75 @@ export async function insertAllergy(actor: Actor, input: { patientId: string; su
       .values({ clinicId: actor.clinicId, patientId: input.patientId, substance: input.substance, reaction: input.reaction, severity: input.severity, createdBy: actor.id, updatedBy: actor.id })
       .returning({ id: allergies.id, substance: allergies.substance });
     return allergy;
+  }));
+}
+const prescriptionFields = {
+  id: prescriptions.id, medicationId: prescriptions.medicationId, dose: prescriptions.dose, unit: prescriptions.unit, route: prescriptions.route,
+  frequency: prescriptions.frequency, durationDays: prescriptions.durationDays, status: prescriptions.status,
+  safetyStatus: prescriptions.safetyStatus, safetySource: prescriptions.safetySource, safetyCheckedAt: prescriptions.safetyCheckedAt,
+  safetyFindings: prescriptions.safetyFindings, overrideReason: prescriptions.overrideReason, issuedAt: prescriptions.issuedAt,
+  name: medications.name, ingredient: medications.ingredient, strength: medications.strength, form: medications.form, source: medications.source,
+};
+export async function searchMedications(term: string) {
+  const like = `%${term.toLowerCase()}%`;
+  return getDb().select({ id: medications.id, name: medications.name, ingredient: medications.ingredient, strength: medications.strength, form: medications.form, source: medications.source })
+    .from(medications).where(sql`lower(${medications.name}) LIKE ${like} OR lower(${medications.ingredient}) LIKE ${like}`)
+    .orderBy(asc(medications.name)).limit(20);
+}
+export async function findMedication(medicationId: string) {
+  const [medication] = await getDb().select({ id: medications.id, name: medications.name, ingredient: medications.ingredient, source: medications.source })
+    .from(medications).where(eq(medications.id, medicationId)).limit(1);
+  return medication;
+}
+export async function listEncounterPrescriptions(clinicId: string, encounterId: string) {
+  return getDb().select(prescriptionFields).from(prescriptions)
+    .innerJoin(medications, eq(prescriptions.medicationId, medications.id))
+    .where(and(eq(prescriptions.clinicId, clinicId), eq(prescriptions.encounterId, encounterId), isNull(prescriptions.deletedAt)))
+    .orderBy(asc(prescriptions.createdAt)).limit(100);
+}
+export async function findPrescription(clinicId: string, prescriptionId: string) {
+  const [prescription] = await getDb().select({ ...prescriptionFields, patientId: prescriptions.patientId, encounterId: prescriptions.encounterId })
+    .from(prescriptions).innerJoin(medications, eq(prescriptions.medicationId, medications.id))
+    .where(and(eq(prescriptions.id, prescriptionId), eq(prescriptions.clinicId, clinicId), isNull(prescriptions.deletedAt))).limit(1);
+  return prescription;
+}
+export async function insertPrescription(actor: Actor, input: { patientId: string; encounterId: string; medicationId: string; dose: string; unit: string; route: string; frequency: string; durationDays: number }) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "prescribe", "clinical.prescription_drafted", async () => {
+    const [prescription] = await tx.insert(prescriptions)
+      .values({ ...input, clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id })
+      .returning({ id: prescriptions.id, status: prescriptions.status });
+    return prescription;
+  }));
+}
+export async function recordSafetyCheck(actor: Actor, input: { prescriptionId: string; patientId: string; status: string; source: string; findings: string[] }) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "prescribe", "clinical.prescription_checked", async () => {
+    const [checked] = await tx.update(prescriptions)
+      .set({ safetyStatus: input.status, safetySource: input.source, safetyFindings: input.findings, safetyCheckedAt: new Date(), updatedBy: actor.id })
+      .where(and(eq(prescriptions.id, input.prescriptionId), eq(prescriptions.clinicId, actor.clinicId), eq(prescriptions.status, "draft"), isNull(prescriptions.deletedAt)))
+      .returning({ id: prescriptions.id, safetyStatus: prescriptions.safetyStatus, safetySource: prescriptions.safetySource });
+    return checked;
+  }));
+}
+/**
+ * Issues against the state the check left behind, re-reading the safety columns in the WHERE
+ * clause so a concurrent re-check cannot be issued past. issued_requires_safety is the backstop.
+ */
+export async function issuePrescriptionRow(actor: Actor, input: { prescriptionId: string; patientId: string; overrideReason: string | null; expectedSafety: string }) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "prescribe", "clinical.prescription_issued", async () => {
+    const [issued] = await tx.update(prescriptions)
+      .set({ status: "issued", issuedAt: new Date(), overrideReason: input.overrideReason, updatedBy: actor.id })
+      .where(and(eq(prescriptions.id, input.prescriptionId), eq(prescriptions.clinicId, actor.clinicId), eq(prescriptions.status, "draft"),
+        eq(prescriptions.safetyStatus, input.expectedSafety), isNull(prescriptions.deletedAt)))
+      .returning({ id: prescriptions.id, status: prescriptions.status, issuedAt: prescriptions.issuedAt });
+    return issued;
+  }));
+}
+export async function cancelPrescriptionRow(actor: Actor, input: { prescriptionId: string; patientId: string }) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "prescribe", "clinical.prescription_cancelled", async () => {
+    const [cancelled] = await tx.update(prescriptions).set({ status: "cancelled", updatedBy: actor.id })
+      .where(and(eq(prescriptions.id, input.prescriptionId), eq(prescriptions.clinicId, actor.clinicId), ne(prescriptions.status, "cancelled"), isNull(prescriptions.deletedAt)))
+      .returning({ id: prescriptions.id });
+    return cancelled;
   }));
 }
 export async function readPublishedSummary(actor: Actor, encounterId: string, patientId: string) {

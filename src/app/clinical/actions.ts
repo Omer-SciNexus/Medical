@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { assertSameOrigin } from "@/modules/identity";
 import { advanceAppointment, getAppointmentForCare } from "@/modules/scheduling";
-import { addProblem, amendNote, AssistUnavailableError, changeProblemStatus, draftNoteText, finishEncounter, getPatientChart, recordAllergy, recordVitals, saveNote, signNote, startEncounter } from "@/modules/clinical";
+import { addProblem, amendNote, AssistUnavailableError, cancelPrescription, changeProblemStatus, checkPrescription, draftNoteText, draftPrescription, findMedications, finishEncounter, getPatientChart, issuePrescription, recordAllergy, recordVitals, saveNote, signNote, startEncounter } from "@/modules/clinical";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
 import type { ActionState } from "@/lib/action-state";
@@ -140,6 +140,60 @@ export async function recordAllergyAction(_previous: ActionState, form: FormData
     await recordAllergy(actor, { encounterId, ...values });
   } catch (error) { return toActionState(error, values); }
   revalidatePath(`/clinical/encounters/${encounterId}`);
+  return { ok: true };
+}
+export type MedicationResult = { ok: true; medications: Awaited<ReturnType<typeof findMedications>> } | { ok: false; error: string };
+export async function searchMedicationsAction(term: string): Promise<MedicationResult> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    return { ok: true, medications: await findMedications(actor, { term }) };
+  } catch (error) {
+    const state = toActionState(error);
+    return { ok: false, error: state.error ?? "The catalogue could not be searched." };
+  }
+}
+export async function draftPrescriptionAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const encounterId = String(form.get("encounterId") ?? "");
+  const values = { medicationId: String(form.get("medicationId") ?? ""), dose: String(form.get("dose") ?? ""), unit: String(form.get("unit") ?? ""),
+    route: String(form.get("route") ?? ""), frequency: String(form.get("frequency") ?? ""), durationDays: String(form.get("durationDays") ?? "") };
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    await draftPrescription(actor, { encounterId, ...values });
+  } catch (error) { return toActionState(error, values); }
+  revalidatePath(`/clinical/encounters/${encounterId}/prescribe`);
+  return { ok: true };
+}
+export async function checkPrescriptionAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const encounterId = String(form.get("encounterId") ?? "");
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    const verdict = await checkPrescription(actor, { prescriptionId: String(form.get("prescriptionId") ?? "") });
+    revalidatePath(`/clinical/encounters/${encounterId}/prescribe`);
+    return { ok: true, notice: `${verdict.source} returned ${verdict.status}.` };
+  } catch (error) { return toActionState(error); }
+}
+export async function issuePrescriptionAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const encounterId = String(form.get("encounterId") ?? "");
+  const values = { overrideReason: String(form.get("overrideReason") ?? "") };
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    await issuePrescription(actor, { prescriptionId: String(form.get("prescriptionId") ?? ""), overrideReason: values.overrideReason });
+  } catch (error) { return toActionState(error, values); }
+  revalidatePath(`/clinical/encounters/${encounterId}/prescribe`);
+  return { ok: true };
+}
+export async function cancelPrescriptionAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const encounterId = String(form.get("encounterId") ?? "");
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    await cancelPrescription(actor, { prescriptionId: String(form.get("prescriptionId") ?? "") });
+  } catch (error) { return toActionState(error); }
+  revalidatePath(`/clinical/encounters/${encounterId}/prescribe`);
   return { ok: true };
 }
 export async function completeVisitAction(_previous: ActionState, form: FormData): Promise<ActionState> {

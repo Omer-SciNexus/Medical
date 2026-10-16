@@ -1,11 +1,12 @@
 import "server-only";
 import { z } from "zod";
-import { getClinicSettings, recordScopedEvent, type Actor } from "@/modules/identity";
+import { getClinicSettings, hasFreshTotp, recordScopedEvent, type Actor } from "@/modules/identity";
 import { getAppointmentForCare, getPatientIdentity } from "@/modules/scheduling";
-import { allergySchema, amendNoteSchema, completeEncounterSchema, draftRequestSchema, EncounterStateError, noteDraftSchema, openEncounterSchema, problemSchema, problemStatusSchema, signNoteSchema, vitalsSchema } from "./validators";
+import { allergySchema, amendNoteSchema, completeEncounterSchema, draftRequestSchema, EncounterStateError, issuePrescriptionSchema, medicationSearchSchema, noteDraftSchema, openEncounterSchema, prescriptionIdSchema, prescriptionSchema, problemSchema, problemStatusSchema, signNoteSchema, vitalsSchema } from "./validators";
 import { draftVisitNote } from "./assist";
+import { checkPrescribingSafety, safetyProviderIsFixture, safetyProviderName, FIXTURE_SOURCE } from "./safety";
 import { observationSeverity, patientAge, vitalByKey } from "./policy";
-import { amendNoteVersion, completeEncounter, findChargeSummary, findCurrentNote, findEncounter, insertAllergy, insertObservations, insertProblem, listNoteHistory, listPatientEncounters, openEncounter, readChart, readPublishedSummary, saveNoteVersion, setProblemStatus, signNoteVersion } from "./repository";
+import { amendNoteVersion, cancelPrescriptionRow, completeEncounter, findChargeSummary, findCurrentNote, findEncounter, findMedication, findPrescription, insertAllergy, insertObservations, insertPrescription, insertProblem, issuePrescriptionRow, listEncounterPrescriptions, listNoteHistory, listPatientEncounters, openEncounter, readChart, readPublishedSummary, recordSafetyCheck, saveNoteVersion, searchMedications, setProblemStatus, signNoteVersion } from "./repository";
 
 function requireClinician(actor: Actor) {
   if (actor.role !== "clinician" || !actor.mfaVerified) throw new EncounterStateError("Only a verified clinician may change a visit record.");
@@ -97,6 +98,78 @@ export async function recordAllergy(actor: Actor, input: unknown) {
   const { encounterId, substance, reaction, severity } = allergySchema.parse(input);
   const encounter = await requireOpenEncounter(actor, encounterId);
   return insertAllergy(actor, { patientId: encounter.patientId, substance, reaction, severity });
+}
+export async function findMedications(actor: Actor, input: unknown) {
+  requireClinician(actor);
+  const { term } = medicationSearchSchema.parse(input);
+  return searchMedications(term);
+}
+export async function getPrescribingWorkspace(actor: Actor, encounterId: string) {
+  requireClinician(actor);
+  const encounter = await requireEncounter(actor, encounterId);
+  const [chart, prescriptions] = await Promise.all([readChart(actor, encounter.patientId), listEncounterPrescriptions(actor.clinicId, encounter.id)]);
+  return { encounter, chart, prescriptions, provider: { name: safetyProviderName(), fixture: safetyProviderIsFixture() } };
+}
+export async function draftPrescription(actor: Actor, input: unknown) {
+  const { encounterId, medicationId, dose, unit, route, frequency, durationDays } = prescriptionSchema.parse(input);
+  const encounter = await requireOpenEncounter(actor, encounterId);
+  if (!await findMedication(medicationId)) throw new EncounterStateError("That medication is not in the catalogue.");
+  return insertPrescription(actor, { patientId: encounter.patientId, encounterId: encounter.id, medicationId, dose: String(dose), unit, route, frequency, durationDays });
+}
+/** Runs the configured provider and stores its verdict, its name and what it said. */
+export async function checkPrescription(actor: Actor, input: unknown) {
+  const { prescriptionId } = prescriptionIdSchema.parse(input);
+  requireClinician(actor);
+  const prescription = await requirePrescription(actor, prescriptionId);
+  if (prescription.status !== "draft") throw new EncounterStateError("This prescription is no longer a draft.");
+  const chart = await readChart(actor, prescription.patientId);
+  const current = await listEncounterPrescriptions(actor.clinicId, prescription.encounterId);
+  const verdict = await checkPrescribingSafety({
+    ingredient: prescription.ingredient, name: prescription.name, dose: Number(prescription.dose), unit: prescription.unit,
+    route: prescription.route, frequency: prescription.frequency, durationDays: prescription.durationDays,
+    allergies: chart.allergies.map((allergy) => ({ substance: allergy.substance, severity: allergy.severity })),
+    current: current.filter((row) => row.id !== prescription.id && row.status !== "cancelled").map((row) => ({ ingredient: row.ingredient, name: row.name })),
+  });
+  const checked = await recordSafetyCheck(actor, { prescriptionId, patientId: prescription.patientId, status: verdict.status, source: verdict.source, findings: verdict.findings });
+  if (!checked) throw new EncounterStateError("This prescription is no longer a draft.");
+  return verdict;
+}
+/**
+ * Issuing is the point of no return, so the rules are explicit here and the database holds the
+ * same line: a hard stop can never be overridden, a warning needs a fresh authenticator check
+ * and a written justification, and a fixture-backed check cannot stand behind an issued row.
+ */
+export async function issuePrescription(actor: Actor, input: unknown) {
+  const { prescriptionId, overrideReason } = issuePrescriptionSchema.parse(input);
+  requireClinician(actor);
+  const prescription = await requirePrescription(actor, prescriptionId);
+  if (prescription.status !== "draft") throw new EncounterStateError("This prescription has already been issued or cancelled.");
+  if (prescription.safetyStatus === "unchecked") throw new EncounterStateError("Run the safety check before issuing.");
+  if (prescription.safetyStatus === "blocked") throw new EncounterStateError("This is a hard stop and cannot be issued. Cancel it and choose another medicine.");
+  if (prescription.safetyStatus === "unavailable") throw new EncounterStateError("The safety service could not be reached, so this cannot be issued. Run the check again.");
+  if (prescription.safetySource === FIXTURE_SOURCE) {
+    throw new EncounterStateError("This build's safety check is a synthetic fixture, so nothing it clears may be issued. Configure a real safety service first.");
+  }
+  if (prescription.safetyStatus === "warning") {
+    if (!hasFreshTotp(actor)) throw new EncounterStateError("Overriding a warning needs a fresh authenticator check. Sign in again, then issue.");
+    if (!overrideReason || overrideReason.length < 20) throw new EncounterStateError("Record at least 20 characters explaining why this warning is being overridden.");
+  }
+  const issued = await issuePrescriptionRow(actor, { prescriptionId, patientId: prescription.patientId,
+    overrideReason: prescription.safetyStatus === "warning" ? overrideReason ?? null : null, expectedSafety: prescription.safetyStatus });
+  if (!issued) throw new EncounterStateError("This prescription changed while you were reviewing it. Reload and check it again.");
+  return issued;
+}
+export async function cancelPrescription(actor: Actor, input: unknown) {
+  const { prescriptionId } = prescriptionIdSchema.parse(input);
+  requireClinician(actor);
+  const prescription = await requirePrescription(actor, prescriptionId);
+  const cancelled = await cancelPrescriptionRow(actor, { prescriptionId, patientId: prescription.patientId });
+  if (!cancelled) throw new EncounterStateError("This prescription is already cancelled.");
+}
+async function requirePrescription(actor: Actor, prescriptionId: string) {
+  const prescription = await findPrescription(actor.clinicId, prescriptionId);
+  if (!prescription) throw new EncounterStateError("This prescription could not be found.");
+  return prescription;
 }
 export async function finishEncounter(actor: Actor, input: unknown) {
   requireClinician(actor);

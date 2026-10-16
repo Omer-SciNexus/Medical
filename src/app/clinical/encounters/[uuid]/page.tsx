@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, CheckCircle2, ChevronRight, History, Home, TriangleAlert } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, History, Home, Pill, TriangleAlert } from "lucide-react";
 import { AppShell } from "@/components/app/shell";
 import { Badge } from "@/components/ui/primitives";
 import { getClinicSettings } from "@/modules/identity";
@@ -52,6 +52,10 @@ export default async function EncounterPage({ params }: { params: Promise<{ uuid
           fee={{ amountMinor: CONSULTATION_FEE_MINOR, currency: clinic?.currency ?? "TRY" }}
           aiEnabled={assistConfigured()}
         />
+
+        {encounter.status === "in_progress" ? <p className="row-actions" style={{ marginTop: 18 }}>
+          <Link className="button button-secondary button-small" href={`/clinical/encounters/${encounter.id}/prescribe`}><Pill />Prescribe</Link>
+        </p> : null}
 
         <ChartEntry
           encounterId={encounter.id}

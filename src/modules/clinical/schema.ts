@@ -50,6 +50,8 @@ export const prescriptions = pgTable("prescriptions", {
   frequency: text("frequency").notNull(), durationDays: integer("duration_days").notNull(),
   status: text("status").default("draft").notNull(), safetyStatus: text("safety_status").default("unchecked").notNull(),
   safetySource: text("safety_source"), safetyCheckedAt: timestamp("safety_checked_at", { withTimezone: true }),
+  /** What the check actually said, kept with the record rather than only its verdict. */
+  safetyFindings: text("safety_findings").array().default(sql`'{}'::text[]`).notNull(),
   overrideReason: text("override_reason"), issuedAt: timestamp("issued_at", { withTimezone: true }),
 }, (t) => [index("prescription_patient").on(t.clinicId, t.patientId), check("positive_dose_duration", sql`${t.dose} > 0 AND ${t.durationDays} > 0`),
   check("prescription_status", sql`${t.status} IN ('draft', 'issued', 'cancelled')`), check("safety_status", sql`${t.safetyStatus} IN ('unchecked', 'clear', 'warning', 'blocked', 'unavailable')`),

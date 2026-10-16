@@ -38,3 +38,18 @@ export class NoteConflictError extends Error {
 export class EncounterStateError extends Error {
   constructor(message: string) { super(message); this.name = "EncounterStateError"; }
 }
+export const medicationSearchSchema = z.object({ term: z.string().trim().min(2, "Enter at least two characters.").max(80) });
+export const prescriptionSchema = z.object({
+  encounterId: z.uuid(), medicationId: z.uuid("Choose a medication."),
+  dose: z.coerce.number().positive("Enter a dose greater than zero.").max(10_000),
+  unit: z.enum(["mg", "micrograms", "g", "mL", "tablet", "capsule", "puff", "unit"], { error: "Choose a unit." }),
+  route: z.enum(["oral", "topical", "inhaled", "intramuscular", "intravenous", "subcutaneous", "rectal"], { error: "Choose a route." }),
+  frequency: z.enum(["once daily", "twice daily", "three times daily", "four times daily", "every 4 hours", "every 6 hours", "weekly", "as needed"], { error: "Choose a frequency." }),
+  durationDays: z.coerce.number().int().positive("A course lasts at least one day.").max(365),
+});
+export const prescriptionIdSchema = z.object({ prescriptionId: z.uuid() });
+export const issuePrescriptionSchema = z.object({
+  prescriptionId: z.uuid(),
+  // Length is checked again in the service, where the warning case is the one that needs it.
+  overrideReason: z.string().trim().max(1_000).optional().transform((value) => value || undefined),
+});
