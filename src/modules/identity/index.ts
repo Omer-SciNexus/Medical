@@ -1,8 +1,15 @@
 export type { Actor, AccessPurpose } from "./validators";
 export { assertCanAccessPatient, auditedPatientOperation, requestBreakGlass, recordScopedEvent, listCareProviders, getClinicSettings, readAuditLog, AccessDeniedError } from "./service";
-export { beginSignIn, finishSignIn, registerWorkspace } from "./auth";
+export { listPeople, invitePerson, resendPersonInvitation, revokePersonInvitation, setPersonActive, resetPersonMfa, revokePersonSessions, PersonAdminError } from "./service";
+export { invitePatientPortal, listPortalLinks } from "./service";
+export { grantWorkflowAccess, listAccessGrants, revokeAccessGrant } from "./service";
+export { recordSystemEvent, findPortalContact } from "./service";
+export { readChainIntegrity, verifyChainFully, exportAuditLog } from "./service";
+export { beginSignIn, finishSignIn, registerWorkspace, acceptInvitation, describeInvitation } from "./auth";
+export { requestPasswordReset, completePasswordReset, confirmEmailVerification, resendOwnVerification, emailVerificationState, restartMfaEnrollment, reissueRecoveryCodes } from "./auth";
 export { resolveSession, revokeSession, revokeAllSessions, SESSION_COOKIE } from "./sessions";
-export { assertSameOrigin, authCookieOptions, setSessionCookie, authConfigured } from "./http";
+export { assertSameOrigin, authCookieOptions, setSessionCookie, authConfigured, allowedAuthOrigins } from "./http";
+export { hasFreshTotp } from "./policy";
 export { AuthenticationError } from "./errors";
-export { loginSchema, registrationSchema, challengeSchema } from "./validators";
+export { loginSchema, registrationSchema, challengeSchema, acceptInvitationSchema, passwordResetSchema, resetRequestSchema } from "./validators";
 export { findAccountSummary } from "./repository";

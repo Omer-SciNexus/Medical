@@ -1,7 +1,7 @@
 import "server-only";
-import { and, asc, desc, eq, gte, isNull, lt, lte, or, gt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, gt, sql } from "drizzle-orm";
 import { getDb, getAuditDb, type Transaction } from "@/platform/db";
-import { auditLog, careRelationships, clinics, users } from "./schema";
+import { auditCheckpoints, auditLog, careRelationships, clinics, invitations, users } from "./schema";
 import type { Actor, AccessPurpose } from "./validators";
 
 export type AuditEvent = {
@@ -40,6 +40,38 @@ export async function hasCareRelationship(actor: Actor, patientId: string, purpo
     or(isNull(careRelationships.expiresAt), gt(careRelationships.expiresAt, new Date())),
   )).limit(1);
   return Boolean(relationship);
+}
+/**
+ * Grants standing access inside the caller's transaction, so authority and the work that
+ * needs it commit together. The partial unique index makes a repeat grant a no-op rather than
+ * a second row, and each grant is recorded.
+ */
+export async function insertCareRelationships(tx: Transaction, input: { clinicId: string; actorId: string; patientId: string; purposes: AccessPurpose[]; createdBy: string; reason: string }) {
+  const granted = await tx.insert(careRelationships)
+    .values(input.purposes.map((purpose) => ({ clinicId: input.clinicId, actorId: input.actorId, patientId: input.patientId, purpose, reason: input.reason, createdBy: input.createdBy })))
+    .onConflictDoNothing().returning({ purpose: careRelationships.purpose });
+  for (const row of granted) {
+    await appendAudit({ clinicId: input.clinicId, actorId: input.createdBy, patientId: input.patientId, action: "access.granted", purpose: row.purpose, outcome: "allowed", resourceId: input.actorId, reason: input.reason }, tx);
+  }
+  return granted.map((row) => row.purpose);
+}
+// Who currently holds access to whom. Patients stay identifiers here: an administrator may
+// see that access exists and withdraw it without being shown a name.
+export async function listLiveRelationships(clinicId: string) {
+  return getDb().select({ id: careRelationships.id, patientId: careRelationships.patientId, purpose: careRelationships.purpose, emergency: careRelationships.emergency,
+    reason: careRelationships.reason, createdAt: careRelationships.createdAt, expiresAt: careRelationships.expiresAt,
+    actorId: careRelationships.actorId, actorName: users.displayName, actorRole: users.role })
+    .from(careRelationships).innerJoin(users, and(eq(careRelationships.actorId, users.id), eq(careRelationships.clinicId, users.clinicId)))
+    .where(and(eq(careRelationships.clinicId, clinicId), isNull(careRelationships.revokedAt),
+      or(isNull(careRelationships.expiresAt), gt(careRelationships.expiresAt, new Date()))))
+    .orderBy(asc(users.displayName), asc(careRelationships.patientId), asc(careRelationships.purpose)).limit(500);
+}
+export async function revokeRelationship(clinicId: string, relationshipId: string, revokedBy: string) {
+  const [revoked] = await getDb().update(careRelationships).set({ revokedAt: new Date() })
+    .where(and(eq(careRelationships.id, relationshipId), eq(careRelationships.clinicId, clinicId), isNull(careRelationships.revokedAt)))
+    .returning({ id: careRelationships.id, patientId: careRelationships.patientId, purpose: careRelationships.purpose, actorId: careRelationships.actorId });
+  if (revoked) await appendAudit({ clinicId, actorId: revokedBy, patientId: revoked.patientId, action: "access.revoked", purpose: revoked.purpose, outcome: "allowed", resourceId: revoked.actorId });
+  return revoked;
 }
 export async function createEmergencyRelationship(actor: Actor, patientId: string, reason: string, tx: Transaction) {
   // Emergency chart review only. Prescribing and changes need normal care authority.
@@ -82,6 +114,46 @@ export async function verifyAuditChain() {
   const [result] = "rows" in rows ? rows.rows : (rows as unknown as { checked: string | number; broken_seq: string | number | null }[]);
   return { checked: Number(result?.checked ?? 0), brokenSeq: result?.broken_seq == null ? null : Number(result.broken_seq) };
 }
+/**
+ * Verifies from the last checkpoint rather than from the beginning, and records a new one when
+ * the walk comes back clean. `full` ignores every checkpoint and walks the whole chain, which
+ * is what the schedule runs: an alteration before a checkpoint is invisible to anything else.
+ */
+export async function verifyAuditChainFrom(options: { full?: boolean } = {}) {
+  const audit = getAuditDb();
+  const checkpoint = options.full ? undefined : await latestCheckpoint();
+  const fromSeq = checkpoint?.seq ?? 0;
+  const result = await audit.execute<{ checked: string | number; broken_seq: string | number | null; last_seq: string | number; last_hash: string | null }>(
+    sql`SELECT * FROM verify_audit_chain_from(${fromSeq}::bigint, ${checkpoint?.hash ?? null}::text)`);
+  const [row] = "rows" in result ? result.rows : (result as unknown as { checked: string | number; broken_seq: string | number | null; last_seq: string | number; last_hash: string | null }[]);
+  const checked = Number(row?.checked ?? 0);
+  const brokenSeq = row?.broken_seq == null ? null : Number(row.broken_seq);
+  const lastSeq = Number(row?.last_seq ?? fromSeq);
+  if (brokenSeq === null && row?.last_hash && lastSeq > fromSeq) {
+    await audit.insert(auditCheckpoints).values({ seq: lastSeq, hash: row.last_hash, checked: (checkpoint?.checked ?? 0) + checked, fullPass: Boolean(options.full) });
+  }
+  return { checked, brokenSeq, fromSeq, lastSeq, full: Boolean(options.full) };
+}
+export async function latestCheckpoint(onlyFull = false) {
+  const [checkpoint] = await getAuditDb().select({ seq: auditCheckpoints.seq, hash: auditCheckpoints.hash, checked: auditCheckpoints.checked,
+    fullPass: auditCheckpoints.fullPass, verifiedAt: auditCheckpoints.verifiedAt })
+    .from(auditCheckpoints).where(onlyFull ? eq(auditCheckpoints.fullPass, true) : undefined)
+    .orderBy(desc(auditCheckpoints.verifiedAt)).limit(1);
+  return checkpoint;
+}
+/** Denials and emergency access grouped by who did it: the view an administrator reviews. */
+export async function summariseAuditOutcomes(clinicId: string, since: Date) {
+  return getAuditDb().select({ actorId: auditLog.actorId, outcome: auditLog.outcome, action: auditLog.action,
+    events: sql<number>`count(*)::int`, latest: sql<Date>`max(${auditLog.createdAt})` })
+    .from(auditLog)
+    .where(and(eq(auditLog.clinicId, clinicId), gte(auditLog.createdAt, since), sql`${auditLog.outcome} IN ('denied', 'emergency')`))
+    .groupBy(auditLog.actorId, auditLog.outcome, auditLog.action)
+    .orderBy(desc(sql`count(*)`)).limit(100);
+}
+/** Export reads through the auditor credential, so it holds identifiers and never a name. */
+export async function exportAuditEvents(clinicId: string, filters: AuditFilters) {
+  return listAuditEvents(clinicId, { ...filters, limit: Math.min(filters.limit, 5_000) });
+}
 export async function consumeRecoveryCode(userId: string, codeHash: string) {
   const result = await getDb().transaction(async (tx) => {
     const [user] = await tx.update(users).set({ recoveryHashes: sql`array_remove(${users.recoveryHashes}, ${codeHash})`, updatedAt: new Date() }).where(and(eq(users.id, userId), eq(users.active, true), sql`${codeHash} = ANY(${users.recoveryHashes})`)).returning();
@@ -89,4 +161,101 @@ export async function consumeRecoveryCode(userId: string, codeHash: string) {
     return user;
   });
   return result;
+}
+// People a clinic's administrator can see and manage. Patient-linked accounts are managed
+// through patient registration, not this list.
+export async function listClinicPeople(clinicId: string) {
+  return getDb().select({ id: users.id, email: users.email, displayName: users.displayName, role: users.role, active: users.active, hasMfa: sql<boolean>`${users.mfaSecret} IS NOT NULL`, createdAt: users.createdAt })
+    .from(users).where(and(eq(users.clinicId, clinicId), ne(users.role, "patient"))).orderBy(asc(users.displayName)).limit(500);
+}
+export async function findClinicUser(clinicId: string, userId: string, tx?: Transaction) {
+  const [user] = await (tx ?? getDb()).select().from(users).where(and(eq(users.id, userId), eq(users.clinicId, clinicId))).limit(1);
+  return user;
+}
+export async function setUserActive(clinicId: string, userId: string, active: boolean, updatedBy: string) {
+  const [user] = await getDb().update(users).set({ active, updatedAt: new Date() }).where(and(eq(users.id, userId), eq(users.clinicId, clinicId))).returning();
+  if (user) await appendAudit({ clinicId, actorId: updatedBy, action: active ? "identity.person_reactivated" : "identity.person_deactivated", purpose: "administration", outcome: "allowed", resourceId: userId });
+  return user;
+}
+export async function setPassword(userId: string, passwordHash: string) {
+  const [user] = await getDb().update(users).set({ passwordHash, updatedAt: new Date() }).where(and(eq(users.id, userId), eq(users.active, true))).returning();
+  if (user) await appendAudit({ clinicId: user.clinicId, actorId: user.id, action: "identity.password_reset", purpose: "authentication", outcome: "allowed" });
+  return user;
+}
+export async function markEmailVerified(userId: string, tx?: Transaction) {
+  const [user] = await (tx ?? getDb()).update(users).set({ emailVerifiedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(users.id, userId), eq(users.active, true), isNull(users.emailVerifiedAt))).returning();
+  if (user) await appendAudit({ clinicId: user.clinicId, actorId: user.id, action: "identity.email_verified", purpose: "authentication", outcome: "allowed" }, tx);
+  return user;
+}
+/** Clears the authenticator so the next challenge enrolls a new one, keeping the account live. */
+export async function clearOwnMfa(userId: string) {
+  const [user] = await getDb().update(users).set({ mfaSecret: null, recoveryHashes: [], updatedAt: new Date() })
+    .where(and(eq(users.id, userId), eq(users.active, true))).returning();
+  if (user) await appendAudit({ clinicId: user.clinicId, actorId: user.id, action: "identity.mfa_restarted", purpose: "authentication", outcome: "allowed" });
+  return user;
+}
+export async function replaceRecoveryCodes(userId: string, hashes: string[]) {
+  const [user] = await getDb().update(users).set({ recoveryHashes: hashes, updatedAt: new Date() })
+    .where(and(eq(users.id, userId), eq(users.active, true), sql`${users.mfaSecret} IS NOT NULL`)).returning();
+  if (user) await appendAudit({ clinicId: user.clinicId, actorId: user.id, action: "identity.recovery_reissued", purpose: "authentication", outcome: "allowed" });
+  return user;
+}
+export async function clearMfaEnrollment(clinicId: string, userId: string, updatedBy: string) {
+  const [user] = await getDb().update(users).set({ mfaSecret: null, recoveryHashes: [], updatedAt: new Date() }).where(and(eq(users.id, userId), eq(users.clinicId, clinicId))).returning();
+  if (user) await appendAudit({ clinicId, actorId: updatedBy, action: "identity.mfa_reset", purpose: "administration", outcome: "allowed", resourceId: userId });
+  return user;
+}
+export async function createInvitation(input: { clinicId: string; email: string; displayName: string; role: "clinician" | "staff" | "patient"; patientId?: string | null; tokenHash: string; invitedBy: string; expiresAt: Date }) {
+  const [invitation] = await getDb().insert(invitations).values(input).returning({ id: invitations.id, expiresAt: invitations.expiresAt });
+  await appendAudit({ clinicId: input.clinicId, actorId: input.invitedBy, patientId: input.patientId ?? null, action: "identity.invitation_created", purpose: input.role === "patient" ? "patient.view" : "administration", outcome: "allowed", resourceId: invitation.id });
+  return invitation;
+}
+export async function findPortalAccount(clinicId: string, patientId: string) {
+  const [user] = await getDb().select({ id: users.id, email: users.email, active: users.active })
+    .from(users).where(and(eq(users.clinicId, clinicId), eq(users.patientId, patientId))).limit(1);
+  return user;
+}
+export async function listPortalAccountsFor(clinicId: string, patientIds: string[]) {
+  if (!patientIds.length) return [];
+  return getDb().select({ patientId: users.patientId, id: users.id, active: users.active })
+    .from(users).where(and(eq(users.clinicId, clinicId), inArray(users.patientId, patientIds))).limit(100);
+}
+export async function listPendingPatientInvitations(clinicId: string, patientIds: string[]) {
+  if (!patientIds.length) return [];
+  return getDb().select({ id: invitations.id, patientId: invitations.patientId, email: invitations.email, expiresAt: invitations.expiresAt })
+    .from(invitations).where(and(eq(invitations.clinicId, clinicId), inArray(invitations.patientId, patientIds), isNull(invitations.consumedAt), isNull(invitations.revokedAt))).limit(100);
+}
+export async function listInvitations(clinicId: string) {
+  return getDb().select({ id: invitations.id, email: invitations.email, displayName: invitations.displayName, role: invitations.role,
+    createdAt: invitations.createdAt, expiresAt: invitations.expiresAt, consumedAt: invitations.consumedAt, revokedAt: invitations.revokedAt })
+    .from(invitations).where(eq(invitations.clinicId, clinicId)).orderBy(desc(invitations.createdAt)).limit(200);
+}
+const pendingInvitation = (clinicId: string, invitationId: string) =>
+  and(eq(invitations.id, invitationId), eq(invitations.clinicId, clinicId), isNull(invitations.consumedAt), isNull(invitations.revokedAt));
+export async function revokeInvitation(clinicId: string, invitationId: string, revokedBy: string) {
+  const [invitation] = await getDb().update(invitations).set({ revokedAt: new Date() }).where(pendingInvitation(clinicId, invitationId)).returning({ id: invitations.id });
+  if (invitation) await appendAudit({ clinicId, actorId: revokedBy, action: "identity.invitation_revoked", purpose: "administration", outcome: "allowed", resourceId: invitationId });
+  return invitation;
+}
+export async function rotateInvitation(clinicId: string, invitationId: string, tokenHash: string, expiresAt: Date, resentBy: string) {
+  const [invitation] = await getDb().update(invitations).set({ tokenHash, expiresAt }).where(pendingInvitation(clinicId, invitationId)).returning({ id: invitations.id, email: invitations.email });
+  if (invitation) await appendAudit({ clinicId, actorId: resentBy, action: "identity.invitation_resent", purpose: "administration", outcome: "allowed", resourceId: invitationId });
+  return invitation;
+}
+export async function findInvitationByTokenHash(tokenHash: string) {
+  const [invitation] = await getDb().select().from(invitations).where(and(eq(invitations.tokenHash, tokenHash), isNull(invitations.consumedAt), isNull(invitations.revokedAt), gt(invitations.expiresAt, new Date()))).limit(1);
+  return invitation;
+}
+// Consumes the invitation and creates the account in one transaction, so a token can never
+// back two accounts and a crash mid-way can never leave a consumed invitation without a user.
+export async function consumeInvitation(invitationId: string, input: { clinicId: string; email: string; displayName: string; role: "clinician" | "staff" | "patient"; patientId: string | null; passwordHash: string }) {
+  return getDb().transaction(async (tx) => {
+    const [consumed] = await tx.update(invitations).set({ consumedAt: new Date() })
+      .where(and(eq(invitations.id, invitationId), isNull(invitations.consumedAt), isNull(invitations.revokedAt), gt(invitations.expiresAt, new Date()))).returning({ id: invitations.id });
+    if (!consumed) return undefined;
+    const [user] = await tx.insert(users).values({ clinicId: input.clinicId, email: input.email, displayName: input.displayName, role: input.role, passwordHash: input.passwordHash, patientId: input.patientId }).returning();
+    await appendAudit({ clinicId: input.clinicId, actorId: user.id, patientId: input.patientId, action: "identity.invitation_accepted", purpose: input.role === "patient" ? "patient.view" : "administration", outcome: "allowed", resourceId: invitationId }, tx);
+    return user;
+  });
 }

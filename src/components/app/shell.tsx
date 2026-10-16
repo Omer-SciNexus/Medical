@@ -1,16 +1,18 @@
 import Link from "next/link";
-import { CalendarCheck, ClipboardList, LayoutDashboard, LogOut, ScrollText, ShieldCheck } from "lucide-react";
+import { CalendarCheck, CalendarPlus, CalendarRange, ChartNoAxesColumn, ClipboardList, KeyRound, LogOut, MonitorCheck, Radio, Receipt, ScrollText, ShieldCheck, UserRoundPlus, Users } from "lucide-react";
 import { MeridianMark } from "@/components/design/graphics";
 import { signOutAction } from "@/app/(auth)/actions";
 import type { Actor } from "@/modules/identity";
 
-// Only routes that exist and that this role may actually open. The staff waiting-room
-// board is not built yet, so staff are not offered a link that would bounce them back.
+// Only routes that exist and that this role may actually open.
 const navigation = {
   clinician: [{ href: "/clinical/today", label: "Today's clinic", icon: ClipboardList }],
-  staff: [{ href: "/dashboard", label: "Your workspace", icon: LayoutDashboard }],
-  patient: [{ href: "/patient/book", label: "Your care", icon: CalendarCheck }],
-  admin: [{ href: "/admin/audit", label: "Access log", icon: ScrollText }],
+  staff: [{ href: "/staff/board", label: "Waiting room", icon: MonitorCheck }, { href: "/staff/patients", label: "Patients", icon: UserRoundPlus }],
+  patient: [{ href: "/patient/appointments", label: "Appointments", icon: CalendarCheck }, { href: "/patient/book", label: "Book a visit", icon: CalendarPlus }],
+  admin: [{ href: "/admin/people", label: "People", icon: Users }, { href: "/admin/schedule", label: "Schedule", icon: CalendarRange },
+    { href: "/staff/board", label: "Waiting room", icon: MonitorCheck }, { href: "/staff/patients", label: "Patients", icon: UserRoundPlus },
+    { href: "/admin/access", label: "Access", icon: KeyRound }, { href: "/admin/services", label: "Price list", icon: Receipt }, { href: "/admin/reports", label: "Report", icon: ChartNoAxesColumn }, { href: "/admin/outbox", label: "Event delivery", icon: Radio },
+    { href: "/admin/audit", label: "Access log", icon: ScrollText }],
 } satisfies Record<Actor["role"], { href: string; label: string; icon: typeof ClipboardList }[]>;
 
 export function AppShell({ actor, clinicName, current, breadcrumb, children, register = "clinical" }: {
@@ -24,7 +26,8 @@ export function AppShell({ actor, clinicName, current, breadcrumb, children, reg
       <nav className="sidebar-section" aria-label="Workspace">
         <span className="eyebrow">Workspace</span>
         <div className="side-nav">{navigation[actor.role].map(({ href, label, icon: Icon }) =>
-          <Link key={href} href={href} data-active={current === href}><Icon />{label}</Link>)}</div>
+          <Link key={href} href={href} data-active={current === href}><Icon />{label}</Link>)}
+          <Link href="/account/security" data-active={current === "/account/security"}><ShieldCheck />Security</Link></div>
       </nav>
       <div className="sidebar-note">
         <div className="workspace-identity">

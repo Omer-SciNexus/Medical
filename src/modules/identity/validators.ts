@@ -20,6 +20,30 @@ export const registrationSchema = z.object({
 }).refine((data) => data.password === data.confirmPassword, { path: ["confirmPassword"], message: "Your passwords don’t match." });
 export const challengeSchema = z.object({ challenge: z.string().regex(/^[a-f0-9]{64}$/), code: z.string().regex(/^(\d{6}|[A-F0-9]{8}-[A-F0-9]{8})$/) });
 export const emergencySchema = z.object({ patientId: z.uuid(), reason: z.string().trim().min(20).max(1000) });
+export const inviteSchema = z.object({
+  email: emailSchema, displayName: z.string().trim().min(2, "Enter their full name.").max(100),
+  role: z.enum(["clinician", "staff"], { error: "Choose clinician or staff." }),
+});
+export const portalInviteSchema = z.object({
+  patientId: z.uuid(),
+  email: emailSchema,
+  displayName: z.string().trim().min(2, "Enter the patient's name.").max(100),
+});
+const tokenSchema = z.string().regex(/^[a-f0-9]{64}$/, "This invitation link is not valid.");
+export const acceptInvitationSchema = z.object({
+  token: tokenSchema,
+  password: z.string().min(15, "Use at least 15 characters for your password.").max(128, "Use no more than 128 characters."),
+  confirmPassword: z.string(),
+}).refine((data) => data.password === data.confirmPassword, { path: ["confirmPassword"], message: "Your passwords don’t match." });
+export const resetRequestSchema = z.object({ email: emailSchema });
+export const passwordResetSchema = z.object({
+  token: tokenSchema,
+  password: z.string().min(15, "Use at least 15 characters for your password.").max(128, "Use no more than 128 characters."),
+  confirmPassword: z.string(),
+}).refine((data) => data.password === data.confirmPassword, { path: ["confirmPassword"], message: "Your passwords don’t match." });
+export const userIdSchema = z.object({ userId: z.uuid() });
+export const invitationIdSchema = z.object({ invitationId: z.uuid() });
+export const relationshipIdSchema = z.object({ relationshipId: z.uuid() });
 // Patient names never become audit filters; the viewer filters on identifiers only.
 export const auditFilterSchema = z.object({
   actorId: z.uuid().optional(), patientId: z.uuid().optional(),

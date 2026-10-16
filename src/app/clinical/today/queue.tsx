@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import { AlertTriangle, CheckCircle2, Inbox, Loader2, ShieldCheck, Stethoscope } from "lucide-react";
 import { Badge, Button, Skeleton } from "@/components/ui/primitives";
 import { clinicalName, clinicalDate } from "@/lib/format";
+import { useLiveRefresh } from "@/components/app/use-live-refresh";
 import { idleAction } from "@/lib/action-state";
 import { advanceAppointmentAction, loadChartAction, startVisitAction, type ChartResult } from "@/app/clinical/actions";
 
@@ -24,14 +25,19 @@ export function Queue({ entries, day, timeZone }: { entries: Entry[]; day: strin
   const selected = entries.find((entry) => entry.id === selectedId) ?? null;
   const [startState, startVisit, startPending] = useActionState(startVisitAction, idleAction);
   const [moveState, moveAppointment, movePending] = useActionState(advanceAppointmentAction, idleAction);
+  // The queue follows the waiting room, so it re-reads itself when the clinic changes.
+  const { live } = useLiveRefresh("clinic:queue", 45);
 
+  // Chart access begins at check-in, so before arrival there is nothing to request: asking
+  // would only produce a denial, which is recorded and would read here as a fault.
+  const chartAvailable = Boolean(selected && selected.status !== "booked" && selected.status !== "cancelled" && selected.status !== "no_show");
   React.useEffect(() => {
-    if (!selected) { setChart(null); return; }
+    if (!selected || !chartAvailable) { setChart(null); return; }
     let active = true;
     setLoadingChart(true);
     loadChartAction(selected.patientId).then((result) => { if (active) { setChart(result); setLoadingChart(false); } });
     return () => { active = false; };
-  }, [selected?.patientId, selected]);
+  }, [selected?.patientId, selected, chartAvailable]);
 
   const move = React.useCallback((offset: number) => {
     setSelectedId((current) => {
@@ -53,7 +59,7 @@ export function Queue({ entries, day, timeZone }: { entries: Entry[]; day: strin
   return <div className="specimen">
     <div className="clinical-toolbar">
       <div><h3><Stethoscope /> Today&rsquo;s clinic <span className="queue-count">{entries.length}</span></h3>
-        <p>{day} &middot; times shown in {timeZone}</p></div>
+        <p>{day} &middot; times shown in {timeZone}{live ? " · updating live" : ""}</p></div>
     </div>
     <div className="clinical-split">
       <div className="queue">
@@ -81,7 +87,9 @@ export function Queue({ entries, day, timeZone }: { entries: Entry[]; day: strin
           <div className="context-heading"><span className="eyebrow">Patient</span><span className="context-symbol"><ShieldCheck /></span></div>
           <p className="context-name">{clinicalName(selected.givenName, selected.surname)}</p>
           <div className="context-meta"><span>{selected.age}y</span><span>{selected.sex}</span><span className="mono">{selected.mrn}</span></div>
-          {loadingChart ? <div style={{ marginTop: 16 }}><Skeleton className="skeleton-line" /><Skeleton className="skeleton-line skeleton-short" /></div>
+          {!chartAvailable ? <p className="context-footnote" style={{ marginTop: 14 }}>
+            This chart opens when the patient is checked in. Access to read, document and prescribe is granted on arrival and recorded.</p>
+            : loadingChart ? <div style={{ marginTop: 16 }}><Skeleton className="skeleton-line" /><Skeleton className="skeleton-line skeleton-short" /></div>
             : chart?.ok === false ? <p className="field-error" style={{ marginTop: 14 }}>{chart.error}</p>
             : chart?.ok ? <>
               {chart.chart.allergies.length ? chart.chart.allergies.map((allergy) => <div key={allergy.id} className="allergy-strip">
@@ -98,6 +106,7 @@ export function Queue({ entries, day, timeZone }: { entries: Entry[]; day: strin
               <p className="context-footnote">Last observed {chart.chart.observations[0] ? clinicalDate(chart.chart.observations[0].observedAt, new Date(), timeZone) : "—"}. Synthetic development data.</p>
             </> : null}
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+            <a className="button button-ghost button-small" href={`/clinical/patients/${selected.patientId}`}>Open the full chart</a>
             {selected.status === "booked" || selected.status === "checked_in" || selected.status === "rooming" ? <form action={moveAppointment}>
               <input type="hidden" name="appointmentId" value={selected.id} /><input type="hidden" name="revision" value={selected.revision} />
               <input type="hidden" name="status" value={selected.status === "booked" ? "checked_in" : selected.status === "checked_in" ? "rooming" : "ready"} />
