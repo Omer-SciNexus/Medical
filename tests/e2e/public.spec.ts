@@ -50,7 +50,7 @@ test("password reset asks for an address, validates it, and promises nothing abo
   // Unconfigured, the action reports that before it validates, so which feedback appears depends
   // on the environment; what must hold either way is that nothing is sent and no session begins.
   if (await page.getByRole("status").filter({ hasText: "Account services are being connected" }).count()) {
-    await expect(page.getByRole("alert")).toContainText("Account services are not available");
+    await expect(page.getByRole("main").getByRole("alert")).toContainText("Account services are not available");
   } else {
     await expect(page.getByLabel("Email address")).toHaveAttribute("aria-invalid", "true");
   }

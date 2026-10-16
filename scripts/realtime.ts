@@ -7,8 +7,10 @@ import { resolveSession, SESSION_COOKIE, allowedAuthOrigins } from "../src/modul
 import { REALTIME_CHANNEL, authorizeChannel, isChannel, parseNudge, readCookie, type Channel } from "../src/platform/realtime";
 import { logOperational } from "../src/platform/log";
 
-const PORT = Number(process.env.REALTIME_PORT ?? 4010);
-const REVALIDATE_MS = Number(process.env.REALTIME_REVALIDATE_MS ?? 60_000);
+// Read when the server starts, not when this module loads, so a caller that configures the
+// environment first — a test, or an entry point that loads its own config — is not ignored.
+const configuredPort = () => Number(process.env.REALTIME_PORT ?? 4010);
+const configuredRevalidateMs = () => Number(process.env.REALTIME_REVALIDATE_MS ?? 60_000);
 
 type Subscriber = { socket: WebSocket; clinicId: string; actorId: string; token: string; channels: Set<Channel> };
 
@@ -21,7 +23,8 @@ type Subscriber = { socket: WebSocket; clinicId: string; actorId: string; token:
  * are re-resolved on a timer, so a revoked session, a deactivated account or a changed role
  * closes the socket rather than waiting for it to go idle.
  */
-export async function startRealtime(port = PORT) {
+export async function startRealtime(port = configuredPort()) {
+  const revalidateMs = configuredRevalidateMs();
   const server = createServer((_request, response) => { response.writeHead(426); response.end("Upgrade required"); });
   const sockets = new WebSocketServer({ noServer: true });
   const subscribers = new Set<Subscriber>();
@@ -74,11 +77,12 @@ export async function startRealtime(port = PORT) {
         subscribers.delete(subscriber);
       }).catch(() => undefined);
     }
-  }, REVALIDATE_MS);
+  }, revalidateMs);
 
   await new Promise<void>((ready) => server.listen(port, "127.0.0.1", ready));
   return {
     port: (server.address() as { port: number }).port,
+    revalidateMs,
     subscriberCount: () => subscribers.size,
     async stop() {
       clearInterval(revalidate);
@@ -92,7 +96,7 @@ export async function startRealtime(port = PORT) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const started = await startRealtime();
-  console.log(`Live updates listening on ws://127.0.0.1:${started.port}. Sessions revalidated every ${REVALIDATE_MS / 1000}s.`);
+  console.log(`Live updates listening on ws://127.0.0.1:${started.port}. Sessions revalidated every ${started.revalidateMs / 1000}s.`);
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => { void started.stop().then(() => process.exit(0)); });
   }

@@ -119,7 +119,9 @@ describe("authority follows the workflow", () => {
       [seedIds.clinic, freshProvider, patientId, seedIds.system])).rejects.toThrow();
   });
   it("still refuses a patient who never booked with this clinician", async () => {
-    const stranger = seedId(101);
+    // A seeded patient with no appointment at all: one on the seeded clinic day would hand the
+    // front desk scheduling authority through the visit, which is a different rule.
+    const stranger = seedId(120);
     await expect(assertCanAccessPatient(provider(), stranger, "clinical.read")).rejects.toBeInstanceOf(AccessDeniedError);
     await expect(assertCanAccessPatient(newStaff(), stranger, "scheduling")).rejects.toBeInstanceOf(AccessDeniedError);
   });

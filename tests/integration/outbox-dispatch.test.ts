@@ -167,7 +167,11 @@ describe("the events the clinic actually raises", () => {
   });
   it("schedules reminders from the appointment alone, and replaces them when it moves", async () => {
     const slots = await listProviderAvailability(patient(22), { providerId: seedIds.clinician, days: 21 });
-    const booked = await bookAppointment(patient(22), { providerId: seedIds.clinician, slotId: slots[0].id, reason: "Reminder scheduling" });
+    // Both offsets only reach a visit more than 24 hours out, and the earliest open slot is on
+    // the seeded clinic day — nearer than that for most of the day this suite could run.
+    const slot = slots.find((candidate) => candidate.startsAt.getTime() > Date.now() + 25 * 3_600_000);
+    expect(slot).toBeDefined();
+    const booked = await bookAppointment(patient(22), { providerId: seedIds.clinician, slotId: slot!.id, reason: "Reminder scheduling" });
     added = []; removed = [];
     const scheduled = await scheduleAppointmentReminders(booked.id);
     expect(scheduled.scheduled).toBeGreaterThan(0);
