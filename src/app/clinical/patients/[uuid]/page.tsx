@@ -5,11 +5,13 @@ import { AlertTriangle, CheckCircle2, ChevronRight, FileText, History, Home, Pil
 import { AppShell } from "@/components/app/shell";
 import { Badge } from "@/components/ui/primitives";
 import { getClinicSettings } from "@/modules/identity";
-import { getPatientChartView } from "@/modules/clinical";
+import { getPatientChartView, listPatientDocuments } from "@/modules/clinical";
+import { objectStoreConfigured } from "@/platform/objects";
 import { clinicalDate, clinicalName } from "@/lib/format";
 import { clinicTimezone } from "@/lib/clinic-day";
 import { requireActor } from "@/app/session";
 import { BreakGlass } from "./break-glass";
+import { Attachments } from "./attachments";
 
 export const metadata: Metadata = { title: "Patient chart", robots: { index: false, follow: false } };
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -21,6 +23,7 @@ export default async function PatientChartPage({ params }: { params: Promise<{ u
   if (!uuidPattern.test(uuid)) notFound();
   const timeZone = clinicTimezone();
   const [clinic, view] = await Promise.all([getClinicSettings(actor), getPatientChartView(actor, uuid).catch(() => null)]);
+  const documents = view ? await listPatientDocuments(actor, uuid).catch(() => []) : [];
   const breadcrumb = <><span className="breadcrumb-app"><Home /></span><Link className="breadcrumb-first" href="/clinical/today">Today</Link><ChevronRight /><span>Chart</span></>;
   const shell = (children: React.ReactNode) =>
     <AppShell actor={actor} clinicName={clinic?.name ?? "Your clinic"} current="/clinical/today" breadcrumb={breadcrumb}>{children}</AppShell>;
@@ -94,6 +97,14 @@ export default async function PatientChartPage({ params }: { params: Promise<{ u
         </table>
       </div> : <div className="state-panel" style={{ minHeight: 0, padding: "24px" }}><p><Pill /> Nothing prescribed for this patient.</p></div>}
     </section>
+
+    <Attachments
+      patientId={patient.id}
+      configured={objectStoreConfigured()}
+      timeZone={timeZone}
+      documents={documents.map((document) => ({ id: document.id, kind: document.kind, filename: document.filename,
+        contentType: document.contentType, byteSize: document.byteSize, createdAt: document.createdAt.toISOString() }))}
+    />
 
     <section className="specimen" style={{ marginTop: 20 }}>
       <div className="specimen-topline"><strong>Prior visits</strong><span>{visits.length}</span></div>

@@ -5,7 +5,7 @@ import { auditedPatientOperation, type Actor } from "@/modules/identity";
 import { completeAppointmentInTransaction } from "@/modules/scheduling";
 import { ensureVisitCharged, getEncounterCharge } from "@/modules/billing";
 import { enqueueOutbox } from "@/platform/outbox";
-import { allergies, encounters, medications, noteVersions, observations, prescriptions, problems } from "./schema";
+import { allergies, documents, encounters, medications, noteVersions, observations, prescriptions, problems } from "./schema";
 import { SOAP_TEMPLATE, encounterIsCompletable } from "./policy";
 import { EncounterStateError, NoteConflictError, type NoteStatus } from "./validators";
 
@@ -271,6 +271,41 @@ export async function findPublishedSummaryState(clinicId: string, encounterId: s
   const [encounter] = await getDb().select({ id: encounters.id, patientId: encounters.patientId, publishedAt: encounters.publishedAt, status: encounters.status })
     .from(encounters).where(and(eq(encounters.id, encounterId), eq(encounters.clinicId, clinicId), isNull(encounters.deletedAt))).limit(1);
   return encounter;
+}
+export async function insertDocument(actor: Actor, input: { patientId: string; encounterId: string | null; kind: string; filename: string; contentType: string; byteSize: number; objectKey: string }) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "clinical.write", "clinical.document_registered", async () => {
+    const [document] = await tx.insert(documents).values({ ...input, clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id })
+      .returning({ id: documents.id, objectKey: documents.objectKey });
+    return document;
+  }));
+}
+export async function confirmDocument(actor: Actor, documentId: string, patientId: string) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "clinical.write", "clinical.document_stored", async () => {
+    const [confirmed] = await tx.update(documents).set({ confirmedAt: new Date(), updatedBy: actor.id })
+      .where(and(eq(documents.id, documentId), eq(documents.clinicId, actor.clinicId), isNull(documents.confirmedAt), isNull(documents.deletedAt)))
+      .returning({ id: documents.id });
+    return confirmed;
+  }));
+}
+export async function discardDocument(actor: Actor, documentId: string) {
+  const [discarded] = await getDb().update(documents).set({ deletedAt: new Date(), updatedBy: actor.id })
+    .where(and(eq(documents.id, documentId), eq(documents.clinicId, actor.clinicId), isNull(documents.deletedAt)))
+    .returning({ id: documents.id });
+  return discarded;
+}
+export async function findDocument(clinicId: string, documentId: string) {
+  const [document] = await getDb().select({ id: documents.id, patientId: documents.patientId, encounterId: documents.encounterId, kind: documents.kind,
+    filename: documents.filename, contentType: documents.contentType, byteSize: documents.byteSize, objectKey: documents.objectKey, confirmedAt: documents.confirmedAt })
+    .from(documents).where(and(eq(documents.id, documentId), eq(documents.clinicId, clinicId), isNull(documents.deletedAt))).limit(1);
+  return document;
+}
+/** Reading the list is a chart read, so it is authorized and recorded like any other. */
+export async function listDocuments(actor: Actor, patientId: string) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "clinical.read", "clinical.documents_read", () =>
+    tx.select({ id: documents.id, kind: documents.kind, filename: documents.filename, contentType: documents.contentType,
+      byteSize: documents.byteSize, encounterId: documents.encounterId, createdAt: documents.createdAt, createdBy: documents.createdBy })
+      .from(documents).where(and(eq(documents.clinicId, actor.clinicId), eq(documents.patientId, patientId), isNull(documents.deletedAt), sql`${documents.confirmedAt} IS NOT NULL`))
+      .orderBy(desc(documents.createdAt)).limit(100)));
 }
 export async function countPatientObservations(clinicId: string, patientId: string) {
   const [row] = await getDb().select({ total: sql<number>`count(*)::int` }).from(observations)

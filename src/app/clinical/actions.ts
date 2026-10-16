@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { assertSameOrigin, requestBreakGlass } from "@/modules/identity";
 import { advanceAppointment, getAppointmentForCare } from "@/modules/scheduling";
-import { addEncounterCharge, addProblem, amendNote, AssistUnavailableError, cancelPrescription, changeProblemStatus, checkPrescription, draftNoteText, draftPrescription, findMedications, finishEncounter, getPatientChart, issuePrescription, recordAllergy, recordVitals, removeEncounterCharge, saveNote, signNote, startEncounter } from "@/modules/clinical";
+import { addEncounterCharge, addProblem, amendNote, AssistUnavailableError, confirmDocumentUpload, cancelPrescription, changeProblemStatus, checkPrescription, draftNoteText, draftPrescription, findMedications, finishEncounter, getPatientChart, issuePrescription, recordAllergy, recordVitals, removeEncounterCharge, requestDocumentDownload, requestDocumentUpload, saveNote, signNote, startEncounter } from "@/modules/clinical";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
 import type { ActionState } from "@/lib/action-state";
@@ -242,4 +242,40 @@ export async function completeVisitAction(_previous: ActionState, form: FormData
   } catch (error) { return toActionState(error, { summary }); }
   revalidatePath(`/clinical/encounters/${encounterId}`);
   return { ok: true };
+}
+
+export type UploadTicket = { ok: true; documentId: string; uploadUrl: string; contentType: string } | { ok: false; error: string };
+/** Hands back a URL signed for one upload. The file never passes through this application. */
+export async function startUploadAction(request: { patientId: string; kind: string; filename: string; contentType: string; byteSize: number }): Promise<UploadTicket> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    const ticket = await requestDocumentUpload(actor, request);
+    return { ok: true, documentId: ticket.documentId, uploadUrl: ticket.uploadUrl, contentType: ticket.contentType };
+  } catch (error) {
+    const state = toActionState(error);
+    return { ok: false, error: state.error ?? "That file could not be attached." };
+  }
+}
+export async function confirmUploadAction(documentId: string): Promise<{ ok: true; filename: string } | { ok: false; error: string }> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    const confirmed = await confirmDocumentUpload(actor, { documentId });
+    return { ok: true, filename: confirmed.filename };
+  } catch (error) {
+    const state = toActionState(error);
+    return { ok: false, error: state.error ?? "That upload could not be confirmed." };
+  }
+}
+export async function openDocumentAction(documentId: string): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["clinician"]);
+    const link = await requestDocumentDownload(actor, { documentId });
+    return { ok: true, url: link.url };
+  } catch (error) {
+    const state = toActionState(error);
+    return { ok: false, error: state.error ?? "That document could not be opened." };
+  }
 }

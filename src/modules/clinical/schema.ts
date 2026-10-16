@@ -56,3 +56,23 @@ export const prescriptions = pgTable("prescriptions", {
 }, (t) => [index("prescription_patient").on(t.clinicId, t.patientId), check("positive_dose_duration", sql`${t.dose} > 0 AND ${t.durationDays} > 0`),
   check("prescription_status", sql`${t.status} IN ('draft', 'issued', 'cancelled')`), check("safety_status", sql`${t.safetyStatus} IN ('unchecked', 'clear', 'warning', 'blocked', 'unavailable')`),
   check("issued_requires_safety", sql`${t.status} <> 'issued' OR (${t.issuedAt} IS NOT NULL AND ${t.safetyCheckedAt} IS NOT NULL AND ${t.safetySource} IS NOT NULL AND ${t.safetySource} <> 'synthetic-fixture' AND (${t.safetyStatus} = 'clear' OR (${t.safetyStatus} = 'warning' AND ${t.overrideReason} IS NOT NULL AND length(${t.overrideReason}) >= 20)))`)]);
+
+/**
+ * A scanned result or a signed consent form. The object itself lives in the store; this row is
+ * what authorizes reaching it, which is why every read goes through patient authorization.
+ */
+export const documents = pgTable("documents", {
+  ...recordColumns(), patientId: uuid("patient_id").notNull(),
+  encounterId: uuid("encounter_id"),
+  kind: text("kind").notNull(),
+  filename: text("filename").notNull(),
+  contentType: text("content_type").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  objectKey: text("object_key").notNull(),
+  /** A document is only visible once the stored object has been checked against this row. */
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("documents_clinic_id_unique").on(t.clinicId, t.id), uniqueIndex("document_object_key").on(t.objectKey),
+  index("document_patient").on(t.clinicId, t.patientId),
+  check("document_kind", sql`${t.kind} IN ('result', 'consent', 'referral', 'letter', 'other')`),
+  check("document_size", sql`${t.byteSize} > 0 AND ${t.byteSize} <= 26214400`),
+  check("document_content_type", sql`${t.contentType} IN ('application/pdf', 'image/png', 'image/jpeg', 'image/tiff')`)]);

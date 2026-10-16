@@ -1,13 +1,16 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { getClinicSettings, hasFreshTotp, recordScopedEvent, type Actor } from "@/modules/identity";
+import { getDb } from "@/platform/db";
+import { headObject, objectStoreConfigured, presignDownload, presignUpload } from "@/platform/objects";
+import { auditedPatientOperation, getClinicSettings, hasFreshTotp, recordScopedEvent, type Actor } from "@/modules/identity";
 import { addVisitCharge, getPriceList, getVisitInvoice, removeVisitCharge } from "@/modules/billing";
 import { getAppointmentForCare, getPatientIdentity } from "@/modules/scheduling";
-import { allergySchema, amendNoteSchema, chargeLineReferenceSchema, completeEncounterSchema, draftRequestSchema, EncounterStateError, issuePrescriptionSchema, medicationSearchSchema, noteDraftSchema, openEncounterSchema, prescriptionIdSchema, prescriptionSchema, problemSchema, problemStatusSchema, signNoteSchema, vitalsSchema } from "./validators";
+import { allergySchema, amendNoteSchema, chargeLineReferenceSchema, documentIdSchema, documentRequestSchema, completeEncounterSchema, draftRequestSchema, EncounterStateError, issuePrescriptionSchema, medicationSearchSchema, noteDraftSchema, openEncounterSchema, prescriptionIdSchema, prescriptionSchema, problemSchema, problemStatusSchema, signNoteSchema, vitalsSchema } from "./validators";
 import { draftVisitNote } from "./assist";
 import { checkPrescribingSafety, safetyProviderIsFixture, safetyProviderName, FIXTURE_SOURCE } from "./safety";
 import { observationSeverity, patientAge, vitalByKey } from "./policy";
-import { amendNoteVersion, cancelPrescriptionRow, completeEncounter, findChargeSummary, findCurrentNote, findEncounter, findMedication, findPrescription, insertAllergy, insertObservations, insertPrescription, insertProblem, issuePrescriptionRow, findPublishedSummaryState, listChartVisits, listEncounterPrescriptions, listNoteHistory, listPatientEncounters, listPatientPrescriptions, openEncounter, readChart, readPublishedSummary, recordSafetyCheck, saveNoteVersion, searchMedications, setProblemStatus, signNoteVersion } from "./repository";
+import { amendNoteVersion, cancelPrescriptionRow, completeEncounter, findChargeSummary, findCurrentNote, findEncounter, findMedication, findPrescription, insertAllergy, insertObservations, insertPrescription, insertProblem, issuePrescriptionRow, confirmDocument, discardDocument, findDocument, findPublishedSummaryState, insertDocument, listChartVisits, listDocuments, listEncounterPrescriptions, listNoteHistory, listPatientEncounters, listPatientPrescriptions, openEncounter, readChart, readPublishedSummary, recordSafetyCheck, saveNoteVersion, searchMedications, setProblemStatus, signNoteVersion } from "./repository";
 
 function requireClinician(actor: Actor) {
   if (actor.role !== "clinician" || !actor.mfaVerified) throw new EncounterStateError("Only a verified clinician may change a visit record.");
@@ -201,6 +204,55 @@ export async function removeEncounterCharge(actor: Actor, input: unknown) {
   const { encounterId } = chargeLineReferenceSchema.parse(input);
   const encounter = await requireOpenEncounter(actor, encounterId);
   return removeVisitCharge(actor, input, { patientId: encounter.patientId, encounterId });
+}
+/**
+ * Registers an attachment and hands back a short-lived upload URL with the content type signed
+ * into it. The row is not visible until the stored object has been checked against it, so a
+ * failed or mismatched upload leaves nothing on the chart.
+ */
+export async function requestDocumentUpload(actor: Actor, input: unknown) {
+  requireClinician(actor);
+  if (!objectStoreConfigured()) throw new EncounterStateError("Document storage is not configured for this deployment.");
+  const request = documentRequestSchema.parse(input);
+  if (request.encounterId) await requireOpenEncounter(actor, request.encounterId);
+  const objectKey = `${actor.clinicId}/${request.patientId}/${randomUUID()}`;
+  const document = await insertDocument(actor, { ...request, encounterId: request.encounterId ?? null, objectKey });
+  const upload = presignUpload(objectKey, request.contentType);
+  return { documentId: document.id, uploadUrl: upload.url, expiresAt: upload.expiresAt, contentType: request.contentType };
+}
+/**
+ * The server's own check of what actually landed, before the document joins the chart. The
+ * probe is a parameter so this rule can be exercised without an object store standing by.
+ */
+export async function confirmDocumentUpload(actor: Actor, input: unknown, probe: typeof headObject = headObject) {
+  requireClinician(actor);
+  const { documentId } = documentIdSchema.parse(input);
+  const document = await findDocument(actor.clinicId, documentId);
+  if (!document) throw new EncounterStateError("That document could not be found.");
+  const stored = await probe(document.objectKey);
+  if (!stored) throw new EncounterStateError("That upload did not arrive. Try attaching the file again.");
+  if (stored.contentType !== document.contentType || stored.byteSize !== document.byteSize) {
+    await discardDocument(actor, documentId);
+    throw new EncounterStateError("What was stored does not match what was attached, so it has been discarded.");
+  }
+  const confirmed = await confirmDocument(actor, documentId, document.patientId);
+  if (!confirmed) throw new EncounterStateError("That document has already been stored.");
+  return { id: confirmed.id, filename: document.filename };
+}
+export async function listPatientDocuments(actor: Actor, patientId: string) {
+  requireClinician(actor);
+  return listDocuments(actor, z.uuid().parse(patientId));
+}
+/** Opening an attachment is a chart read: authorized, recorded, and good for two minutes. */
+export async function requestDocumentDownload(actor: Actor, input: unknown) {
+  requireClinician(actor);
+  const { documentId } = documentIdSchema.parse(input);
+  const document = await findDocument(actor.clinicId, documentId);
+  if (!document?.confirmedAt) throw new EncounterStateError("That document could not be found.");
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, document.patientId, "clinical.read", "clinical.document_opened", async () => {
+    const link = presignDownload(document.objectKey);
+    return { url: link.url, expiresAt: link.expiresAt, filename: document.filename, contentType: document.contentType };
+  }));
 }
 export async function finishEncounter(actor: Actor, input: unknown) {
   requireClinician(actor);
