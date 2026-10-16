@@ -2,7 +2,7 @@ export { resolvePatientScope, resolveImminentVisit, listProviderAvailability, bo
 export { getScheduleAuthoring, addAvailabilityTemplate, removeAvailabilityTemplate, addScheduleBlackout, removeScheduleBlackout, extendProviderSchedule, getProviderSlotCount } from "./service";
 export { registerPatient, searchPatients } from "./service";
 export { reschedulePatientAppointment, listMyAppointmentOptions } from "./service";
-export { getWaitingRoomBoard } from "./service";
+export { getWaitingRoomBoard, getClinicReport } from "./service";
 export { findReminderTarget, listReminderWindow } from "./repository";
 export { SlotUnavailableError, StaleAppointmentError, ScheduleAuthoringError, PatientRegistrationError, appointmentStatusSchema, bookingSchema, transitionSchema } from "./validators";
 export { waitingMinutes, canTransition, roleMayTransition } from "./policy";

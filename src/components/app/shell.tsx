@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarCheck, CalendarPlus, CalendarRange, ClipboardList, KeyRound, LogOut, MonitorCheck, Radio, Receipt, ScrollText, ShieldCheck, UserRoundPlus, Users } from "lucide-react";
+import { CalendarCheck, CalendarPlus, CalendarRange, ChartNoAxesColumn, ClipboardList, KeyRound, LogOut, MonitorCheck, Radio, Receipt, ScrollText, ShieldCheck, UserRoundPlus, Users } from "lucide-react";
 import { MeridianMark } from "@/components/design/graphics";
 import { signOutAction } from "@/app/(auth)/actions";
 import type { Actor } from "@/modules/identity";
@@ -11,7 +11,7 @@ const navigation = {
   patient: [{ href: "/patient/appointments", label: "Appointments", icon: CalendarCheck }, { href: "/patient/book", label: "Book a visit", icon: CalendarPlus }],
   admin: [{ href: "/admin/people", label: "People", icon: Users }, { href: "/admin/schedule", label: "Schedule", icon: CalendarRange },
     { href: "/staff/board", label: "Waiting room", icon: MonitorCheck }, { href: "/staff/patients", label: "Patients", icon: UserRoundPlus },
-    { href: "/admin/access", label: "Access", icon: KeyRound }, { href: "/admin/services", label: "Price list", icon: Receipt }, { href: "/admin/outbox", label: "Event delivery", icon: Radio },
+    { href: "/admin/access", label: "Access", icon: KeyRound }, { href: "/admin/services", label: "Price list", icon: Receipt }, { href: "/admin/reports", label: "Report", icon: ChartNoAxesColumn }, { href: "/admin/outbox", label: "Event delivery", icon: Radio },
     { href: "/admin/audit", label: "Access log", icon: ScrollText }],
 } satisfies Record<Actor["role"], { href: string; label: string; icon: typeof ClipboardList }[]>;
 

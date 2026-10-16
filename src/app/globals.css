@@ -714,6 +714,10 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 .invite-link { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--line)); background: var(--accent-soft); border-radius: 8px; padding: 13px 16px; margin-bottom: 20px; }
 .invite-link strong { display: block; font-weight: 500; font-size: 12px; }
 .invite-link code { font-size: 11px; color: var(--ink-600); word-break: break-all; }
+.wait-bands { list-style: none; margin: 0; padding: 0; }
+.wait-bands li { display: grid; grid-template-columns: 170px minmax(0, 1fr) 44px; gap: 12px; align-items: center; padding: 11px 18px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.wait-bar { display: block; height: 8px; border-radius: 4px; background: var(--surface); overflow: hidden; }
+.wait-bar span { display: block; height: 100%; background: var(--accent); }
 .patient-invoice { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
 .patient-invoice h2 { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 500; margin-bottom: 12px; }
 .patient-invoice h2 svg { width: 15px; height: 15px; color: var(--ink-600); }

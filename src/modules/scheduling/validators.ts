@@ -16,6 +16,10 @@ export const queryDaySchema = z.object({ day: z.string().regex(/^\d{4}-\d{2}-\d{
 
 const clinicDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a date in YYYY-MM-DD form.");
 // Times arrive as HH:MM from a time input and are stored as minutes from local midnight.
+export const reportRangeSchema = z.object({
+  from: clinicDay.optional(),
+  days: z.coerce.number().int().min(1).max(92).default(28),
+});
 const timeOfDay = z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, "Use a time in HH:MM form.")
   .transform((value) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5)));
 export const templateSchema = z.object({

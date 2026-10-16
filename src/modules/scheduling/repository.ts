@@ -121,6 +121,56 @@ export async function listWaitingRoom(clinicId: string, from: Date, to: Date) {
  * System-level read for the worker: no actor, and nothing clinical. A reminder needs the time,
  * the state and what to bring, and the worker has no person on whose behalf to be authorized.
  */
+/**
+ * The operating picture for a date range, derived from the appointment table and the slots it
+ * references: no-shows, how long people waited, and how much of each session was taken up.
+ * Counts and minutes only, so nothing here identifies a patient.
+ */
+export async function summariseClinicDays(clinicId: string, from: Date, to: Date) {
+  const [totals] = await getDb().select({
+    booked: sql<number>`count(*)::int`,
+    seen: sql<number>`count(*) FILTER (WHERE ${appointments.status} = 'done')::int`,
+    noShows: sql<number>`count(*) FILTER (WHERE ${appointments.status} = 'no_show')::int`,
+    cancelled: sql<number>`count(*) FILTER (WHERE ${appointments.status} = 'cancelled')::int`,
+    arrived: sql<number>`count(${appointments.checkedInAt})::int`,
+    medianWait: sql<number | null>`(percentile_disc(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (${availabilitySlots.startsAt} - ${appointments.checkedInAt})) / 60))::float8`,
+    longestWait: sql<number | null>`(max(EXTRACT(EPOCH FROM (${availabilitySlots.startsAt} - ${appointments.checkedInAt})) / 60))::float8`,
+  }).from(appointments)
+    .innerJoin(availabilitySlots, and(eq(appointments.slotId, availabilitySlots.id), eq(appointments.clinicId, availabilitySlots.clinicId)))
+    .where(and(eq(appointments.clinicId, clinicId), isNull(appointments.deletedAt), gte(availabilitySlots.startsAt, from), lt(availabilitySlots.startsAt, to)));
+  return totals;
+}
+export async function summariseProviderUtilisation(clinicId: string, from: Date, to: Date) {
+  return getDb().select({
+    providerId: availabilitySlots.providerId,
+    slots: sql<number>`count(*)::int`,
+    offeredMinutes: sql<number>`coalesce(sum(EXTRACT(EPOCH FROM (${availabilitySlots.endsAt} - ${availabilitySlots.startsAt})) / 60), 0)::int`,
+    booked: sql<number>`count(${appointments.id})::int`,
+    seen: sql<number>`count(*) FILTER (WHERE ${appointments.status} = 'done')::int`,
+    noShows: sql<number>`count(*) FILTER (WHERE ${appointments.status} = 'no_show')::int`,
+  }).from(availabilitySlots)
+    .leftJoin(appointments, and(eq(appointments.slotId, availabilitySlots.id), eq(appointments.clinicId, availabilitySlots.clinicId),
+      isNull(appointments.deletedAt), ne(appointments.status, "cancelled")))
+    .where(and(eq(availabilitySlots.clinicId, clinicId), isNull(availabilitySlots.deletedAt), gte(availabilitySlots.startsAt, from), lt(availabilitySlots.startsAt, to)))
+    .groupBy(availabilitySlots.providerId).limit(100);
+}
+/** Waits grouped into bands, which is more honest about the distribution than an average. */
+export async function waitDistribution(clinicId: string, from: Date, to: Date) {
+  const rows = await getDb().select({
+    band: sql<string>`CASE
+      WHEN EXTRACT(EPOCH FROM (${availabilitySlots.startsAt} - ${appointments.checkedInAt})) / 60 < 0 THEN 'late'
+      WHEN EXTRACT(EPOCH FROM (${availabilitySlots.startsAt} - ${appointments.checkedInAt})) / 60 < 5 THEN 'under 5'
+      WHEN EXTRACT(EPOCH FROM (${availabilitySlots.startsAt} - ${appointments.checkedInAt})) / 60 < 15 THEN '5 to 15'
+      WHEN EXTRACT(EPOCH FROM (${availabilitySlots.startsAt} - ${appointments.checkedInAt})) / 60 < 30 THEN '15 to 30'
+      ELSE 'over 30' END`,
+    arrivals: sql<number>`count(*)::int`,
+  }).from(appointments)
+    .innerJoin(availabilitySlots, and(eq(appointments.slotId, availabilitySlots.id), eq(appointments.clinicId, availabilitySlots.clinicId)))
+    .where(and(eq(appointments.clinicId, clinicId), isNull(appointments.deletedAt), sql`${appointments.checkedInAt} IS NOT NULL`,
+      gte(availabilitySlots.startsAt, from), lt(availabilitySlots.startsAt, to)))
+    .groupBy(sql`1`);
+  return rows;
+}
 export async function findReminderTarget(appointmentId: string) {
   const [appointment] = await getDb().select({ id: appointments.id, clinicId: appointments.clinicId, patientId: appointments.patientId,
     status: appointments.status, preparation: appointments.preparation, startsAt: availabilitySlots.startsAt })
