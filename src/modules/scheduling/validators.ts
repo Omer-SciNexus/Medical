@@ -11,6 +11,7 @@ export const bookingSchema = z.object({
 });
 // Revision accompanies every transition so a stale screen cannot overwrite a newer state.
 export const transitionSchema = z.object({ appointmentId: z.uuid(), revision: z.coerce.number().int().positive(), status: appointmentStatusSchema });
+export const rescheduleSchema = z.object({ appointmentId: z.uuid(), revision: z.coerce.number().int().positive(), slotId: z.uuid() });
 export const queryDaySchema = z.object({ day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
 
 const clinicDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a date in YYYY-MM-DD form.");

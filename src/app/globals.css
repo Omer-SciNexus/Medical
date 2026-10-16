@@ -714,6 +714,30 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 .invite-link { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--line)); background: var(--accent-soft); border-radius: 8px; padding: 13px 16px; margin-bottom: 20px; }
 .invite-link strong { display: block; font-weight: 500; font-size: 12px; }
 .invite-link code { font-size: 11px; color: var(--ink-600); word-break: break-all; }
+.board-summary { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 16px 20px; margin-bottom: 16px; }
+.board-summary > div { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--ink-600); }
+.board-count { font-size: 26px; font-weight: 500; color: var(--ink-900); font-variant-numeric: tabular-nums; }
+.board-summary > button { margin-left: auto; }
+.board-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.board-list > li { display: grid; grid-template-columns: 150px 170px minmax(0, 1fr); gap: 16px; align-items: center; border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; background: var(--paper); padding: 14px 18px; }
+.board-list > li[data-state="ready"] { border-left-color: var(--accent); }
+.board-list > li[data-state="in_progress"] { border-left-color: var(--high, var(--accent)); }
+.board-list > li[data-state="done"], .board-list > li[data-state="cancelled"], .board-list > li[data-state="no_show"] { opacity: 0.6; }
+.board-when { display: flex; flex-direction: column; gap: 2px; }
+.board-when strong { font-size: 24px; font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.board-when span { font-size: 11px; color: var(--ink-600); }
+.board-state { display: flex; align-items: center; gap: 10px; }
+.board-state .badge { font-size: 12px; }
+.board-waited { font-size: 12px; color: var(--ink-600); font-variant-numeric: tabular-nums; }
+.board-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.appointment-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.appointment-list > li { border: 1px solid var(--line); border-radius: 10px; background: var(--paper); padding: 16px 18px; }
+.appointment-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.appointment-head strong { font-size: 15px; font-weight: 500; }
+.appointment-time, .appointment-meta { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-600); margin-top: 5px; }
+.appointment-time svg, .appointment-meta svg, .appointment-prep svg { width: 13px; height: 13px; }
+.appointment-prep { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--ink-600); margin: 12px 0; padding-top: 12px; border-top: 1px solid var(--line); line-height: 1.6; }
+.appointment-list-past > li { opacity: 0.82; }
 .chart-identity { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; }
 .chart-columns { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 18px; align-items: start; }
 .chart-list { list-style: none; margin: 0; padding: 0; }
@@ -767,6 +791,8 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 }
 @media (max-width: 800px) {
   .encounter-grid, .booking-form { grid-template-columns: 1fr; }
+  .board-list > li { grid-template-columns: 1fr 1fr; }
+  .board-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .vitals-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .allergy-form { grid-template-columns: 1fr; }
   .booking-review { grid-column: 1; grid-row: auto; }

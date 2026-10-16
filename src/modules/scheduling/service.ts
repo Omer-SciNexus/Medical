@@ -5,9 +5,9 @@ import { auditedPatientOperation } from "@/modules/identity";
 import { getDb, type Transaction } from "@/platform/db";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { addClinicDays, clinicDayRange, clinicTimezone, todayInZone, weekdayOf, zonedInstant, zonedStartOfDay } from "@/lib/clinic-day";
-import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientRegistrationSchema, patientSearchSchema, queryDaySchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
+import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientRegistrationSchema, patientSearchSchema, queryDaySchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
-import { claimSlot, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findPatientIdentity, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, insertPatient, listBlackouts, listOpenSlots, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
+import { claimSlot, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findPatientIdentity, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
 // here would recurse. It returns only scope membership and is not a Server Action.
@@ -44,6 +44,23 @@ export async function bookAppointment(actor: Actor, input: unknown) {
 export async function listMyAppointments(actor: Actor) {
   return listPatientAppointments(actor, ownPatientId(actor));
 }
+/**
+ * A patient keeps their clinician when they move a visit: choosing someone else is a new
+ * booking, which is also what grants that clinician scheduling authority over them.
+ */
+export async function reschedulePatientAppointment(actor: Actor, input: unknown) {
+  const { appointmentId, revision, slotId } = rescheduleSchema.parse(input);
+  const patientId = ownPatientId(actor);
+  const appointment = await findAppointment(actor.clinicId, appointmentId);
+  if (!appointment || appointment.patientId !== patientId) throw new AccessScopeError();
+  if (appointment.status !== "booked") throw new SlotUnavailableError();
+  if (!await findSlot(actor.clinicId, slotId, appointment.providerId)) throw new SlotUnavailableError();
+  return moveAppointmentToSlot(actor, { appointmentId, patientId, revision, slotId, providerId: appointment.providerId });
+}
+export async function listMyAppointmentOptions(actor: Actor, providerId: string) {
+  ownPatientId(actor);
+  return listProviderAvailability(actor, { providerId: z.uuid().parse(providerId), days: 30 });
+}
 export async function getClinicianQueue(actor: Actor, input: unknown) {
   const { day } = queryDaySchema.parse(input ?? {});
   if (actor.role !== "clinician" || !actor.mfaVerified) throw new AccessScopeError();
@@ -54,6 +71,20 @@ export async function getClinicianQueue(actor: Actor, input: unknown) {
   // The list is scoped to this clinician's own sessions and its read is recorded. Opening
   // any chart from it still goes through per-patient authorization.
   await recordScopedEvent(actor, { action: "scheduling.queue_read", purpose: "scheduling", reason: `${clinicDay}:${rows.length}` });
+  return { day: clinicDay, timeZone, entries: rows.map((row) => ({ ...row, waitingMinutes: waitingMinutes(row.checkedInAt) })) };
+}
+/**
+ * Every appointment in the clinic for one day, as times and states only. The front desk moves
+ * people through from here; identifying a particular patient is what the patient search is for.
+ */
+export async function getWaitingRoomBoard(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { day } = queryDaySchema.parse(input ?? {});
+  const timeZone = clinicTimezone();
+  const clinicDay = day ?? todayInZone(timeZone);
+  const { from, to } = clinicDayRange(clinicDay, timeZone);
+  const rows = await listWaitingRoom(actor.clinicId, from, to);
+  await recordScopedEvent(actor, { action: "scheduling.board_read", purpose: "scheduling", reason: `${clinicDay}:${rows.length}` });
   return { day: clinicDay, timeZone, entries: rows.map((row) => ({ ...row, waitingMinutes: waitingMinutes(row.checkedInAt) })) };
 }
 function requireFrontDesk(actor: Actor) {

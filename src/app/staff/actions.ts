@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { assertSameOrigin, invitePatientPortal, listPortalLinks } from "@/modules/identity";
-import { registerPatient, searchPatients } from "@/modules/scheduling";
+import { advanceAppointment, registerPatient, searchPatients } from "@/modules/scheduling";
 import { patientAge } from "@/modules/clinical";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
@@ -51,4 +51,15 @@ export async function invitePatientPortalAction(_previous: ActionState, form: Fo
     revalidatePath(PATIENTS);
     return { ok: true, link: invitation.link, delivered: invitation.delivered };
   } catch (error) { return toActionState(error, values); }
+}
+
+/** The board's only write. Which transitions staff may make is roleMayTransition's business. */
+export async function advanceFromBoardAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    await advanceAppointment(actor, { appointmentId: field(form, "appointmentId"), revision: Number(form.get("revision") ?? 0), status: field(form, "status") });
+  } catch (error) { return toActionState(error); }
+  revalidatePath("/staff/board");
+  return { ok: true };
 }

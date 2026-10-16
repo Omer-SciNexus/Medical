@@ -44,6 +44,30 @@ export async function claimSlot(actor: Actor, patientId: string, input: { slotId
     throw error;
   }
 }
+/**
+ * Moves an appointment onto another slot in one statement: the row stops referencing the old
+ * slot, which releases it, and active_slot_booking is what guarantees the new one was free.
+ * No second lock is needed, and a lost race surfaces as the slot simply being taken.
+ */
+export async function moveAppointmentToSlot(actor: Actor, input: { appointmentId: string; patientId: string; revision: number; slotId: string; providerId: string }) {
+  try {
+    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "scheduling", "scheduling.appointment_rescheduled", async () => {
+      const [slot] = await tx.select({ id: availabilitySlots.id, startsAt: availabilitySlots.startsAt }).from(availabilitySlots)
+        .where(and(eq(availabilitySlots.id, input.slotId), eq(availabilitySlots.clinicId, actor.clinicId), eq(availabilitySlots.providerId, input.providerId), isNull(availabilitySlots.deletedAt)))
+        .for("update").limit(1);
+      if (!slot || slot.startsAt.getTime() <= Date.now()) throw new SlotUnavailableError();
+      const [moved] = await tx.update(appointments).set({ slotId: input.slotId, revision: input.revision + 1, updatedBy: actor.id })
+        .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId),
+          eq(appointments.revision, input.revision), eq(appointments.status, "booked"), isNull(appointments.deletedAt)))
+        .returning({ id: appointments.id, revision: appointments.revision, slotId: appointments.slotId });
+      if (!moved) throw new StaleAppointmentError();
+      return moved;
+    }));
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new SlotUnavailableError();
+    throw error;
+  }
+}
 export async function listPatientAppointments(actor: Actor, patientId: string) {
   return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.appointments_read", () =>
     tx.select({ id: appointments.id, reason: appointments.reason, preparation: appointments.preparation, status: appointments.status, revision: appointments.revision,
@@ -76,6 +100,18 @@ export async function hasImminentAppointment(clinicId: string, patientId: string
     .where(and(eq(appointments.clinicId, clinicId), eq(appointments.patientId, patientId), isNull(appointments.deletedAt), ne(appointments.status, "cancelled"),
       gte(availabilitySlots.startsAt, new Date(now - 86_400_000)), lt(availabilitySlots.startsAt, new Date(now + 86_400_000)))).limit(1);
   return Boolean(appointment);
+}
+/**
+ * The waiting-room board. Deliberately selects no patient column: this screen faces a room, so
+ * it can show times and states and nothing that identifies who is waiting.
+ */
+export async function listWaitingRoom(clinicId: string, from: Date, to: Date) {
+  return getDb().select({ id: appointments.id, status: appointments.status, revision: appointments.revision, checkedInAt: appointments.checkedInAt,
+    startsAt: availabilitySlots.startsAt, endsAt: availabilitySlots.endsAt, providerId: availabilitySlots.providerId })
+    .from(appointments)
+    .innerJoin(availabilitySlots, and(eq(appointments.slotId, availabilitySlots.id), eq(appointments.clinicId, availabilitySlots.clinicId)))
+    .where(and(eq(appointments.clinicId, clinicId), isNull(appointments.deletedAt), gte(availabilitySlots.startsAt, from), lt(availabilitySlots.startsAt, to)))
+    .orderBy(asc(availabilitySlots.startsAt)).limit(200);
 }
 export async function findAppointment(clinicId: string, appointmentId: string) {
   const [appointment] = await getDb().select({ id: appointments.id, patientId: appointments.patientId, reason: appointments.reason, status: appointments.status, revision: appointments.revision,
