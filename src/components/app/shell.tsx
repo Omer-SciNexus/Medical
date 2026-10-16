@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarCheck, CalendarRange, ClipboardList, LayoutDashboard, LogOut, ScrollText, ShieldCheck, UserRoundPlus, Users } from "lucide-react";
+import { CalendarCheck, CalendarRange, ClipboardList, KeyRound, LayoutDashboard, LogOut, ScrollText, ShieldCheck, UserRoundPlus, Users } from "lucide-react";
 import { MeridianMark } from "@/components/design/graphics";
 import { signOutAction } from "@/app/(auth)/actions";
 import type { Actor } from "@/modules/identity";
@@ -10,7 +10,8 @@ const navigation = {
   staff: [{ href: "/staff/patients", label: "Patients", icon: UserRoundPlus }, { href: "/dashboard", label: "Your workspace", icon: LayoutDashboard }],
   patient: [{ href: "/patient/book", label: "Your care", icon: CalendarCheck }],
   admin: [{ href: "/admin/people", label: "People", icon: Users }, { href: "/admin/schedule", label: "Schedule", icon: CalendarRange },
-    { href: "/staff/patients", label: "Patients", icon: UserRoundPlus }, { href: "/admin/audit", label: "Access log", icon: ScrollText }],
+    { href: "/staff/patients", label: "Patients", icon: UserRoundPlus },
+    { href: "/admin/access", label: "Access", icon: KeyRound }, { href: "/admin/audit", label: "Access log", icon: ScrollText }],
 } satisfies Record<Actor["role"], { href: string; label: string; icon: typeof ClipboardList }[]>;
 
 export function AppShell({ actor, clinicName, current, breadcrumb, children, register = "clinical" }: {

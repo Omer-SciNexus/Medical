@@ -2,6 +2,7 @@ export type { Actor, AccessPurpose } from "./validators";
 export { assertCanAccessPatient, auditedPatientOperation, requestBreakGlass, recordScopedEvent, listCareProviders, getClinicSettings, readAuditLog, AccessDeniedError } from "./service";
 export { listPeople, invitePerson, resendPersonInvitation, revokePersonInvitation, setPersonActive, resetPersonMfa, revokePersonSessions, PersonAdminError } from "./service";
 export { invitePatientPortal, listPortalLinks } from "./service";
+export { grantWorkflowAccess, listAccessGrants, revokeAccessGrant } from "./service";
 export { beginSignIn, finishSignIn, registerWorkspace, acceptInvitation, describeInvitation } from "./auth";
 export { resolveSession, revokeSession, revokeAllSessions, SESSION_COOKIE } from "./sessions";
 export { assertSameOrigin, authCookieOptions, setSessionCookie, authConfigured } from "./http";

@@ -715,6 +715,8 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 .invite-link strong { display: block; font-weight: 500; font-size: 12px; }
 .invite-link code { font-size: 11px; color: var(--ink-600); word-break: break-all; }
 .schedule-form { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.grant-flag { margin-left: 7px; }
+.grant-flag svg { width: 9px; height: 9px; }
 .provider-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
 .provider-tabs .shortcut-button[data-active="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .auth-invitation { display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 4px; }

@@ -37,6 +37,7 @@ export const acceptInvitationSchema = z.object({
 }).refine((data) => data.password === data.confirmPassword, { path: ["confirmPassword"], message: "Your passwords don’t match." });
 export const userIdSchema = z.object({ userId: z.uuid() });
 export const invitationIdSchema = z.object({ invitationId: z.uuid() });
+export const relationshipIdSchema = z.object({ relationshipId: z.uuid() });
 // Patient names never become audit filters; the viewer filters on identifiers only.
 export const auditFilterSchema = z.object({
   actorId: z.uuid().optional(), patientId: z.uuid().optional(),

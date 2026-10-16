@@ -41,6 +41,10 @@ export const careRelationships = pgTable("care_relationships", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: uuid("created_by").notNull().references(() => users.id),
 }, (t) => [index("care_access_lookup").on(t.clinicId, t.actorId, t.patientId, t.purpose),
+  // Booking and check-in grant relationships repeatedly for the same patient, so one live
+  // standing grant per actor, patient and purpose makes those grants idempotent here rather
+  // than in application code. Emergency grants recur by design and carry their own expiry.
+  uniqueIndex("standing_care_grant").on(t.clinicId, t.actorId, t.patientId, t.purpose).where(sql`${t.revokedAt} IS NULL AND ${t.emergency} = false`),
   check("emergency_requires_reason_expiry", sql`NOT ${t.emergency} OR (${t.reason} IS NOT NULL AND length(${t.reason}) >= 20 AND ${t.expiresAt} IS NOT NULL)`)]);
 
 export const invitations = pgTable("invitations", {

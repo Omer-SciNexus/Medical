@@ -7,12 +7,20 @@ import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { addClinicDays, clinicDayRange, clinicTimezone, todayInZone, weekdayOf, zonedInstant, zonedStartOfDay } from "@/lib/clinic-day";
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientRegistrationSchema, patientSearchSchema, queryDaySchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
-import { claimSlot, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findPatientIdentity, findSlot, highestMrnNumber, insertGeneratedSlots, insertPatient, listBlackouts, listOpenSlots, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
+import { claimSlot, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findPatientIdentity, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, insertPatient, listBlackouts, listOpenSlots, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
 // here would recurse. It returns only scope membership and is not a Server Action.
 export async function resolvePatientScope(actor: Actor, patientId: string, tx?: Transaction) {
   return patientIsInClinic(z.uuid().parse(actor.clinicId), z.uuid().parse(patientId), tx);
+}
+/**
+ * The other half of that handshake, for the front desk alone: whether this patient has a visit
+ * either side of now. Authorization reads it as scheduling authority for staff, so a receptionist
+ * can run the waiting room without a standing grant on every patient in the clinic.
+ */
+export async function resolveImminentVisit(actor: Actor, patientId: string, tx?: Transaction) {
+  return hasImminentAppointment(z.uuid().parse(actor.clinicId), z.uuid().parse(patientId), tx);
 }
 function ownPatientId(actor: Actor) {
   if (actor.role !== "patient" || !actor.patientId) throw new AccessScopeError();
@@ -189,7 +197,7 @@ export async function advanceAppointment(actor: Actor, input: unknown) {
   const appointment = await findAppointment(actor.clinicId, appointmentId);
   if (!appointment) throw new AccessScopeError();
   if (!roleMayTransition(actor.role, status) || !canTransition(appointment.status, status)) throw new AccessScopeError();
-  return transitionAppointment(actor, { appointmentId, patientId: appointment.patientId, revision, status });
+  return transitionAppointment(actor, { appointmentId, patientId: appointment.patientId, providerId: appointment.providerId, revision, status });
 }
 /** Called by the clinical completion transaction, never directly from a Server Action. */
 export async function completeAppointmentInTransaction(tx: Transaction, actor: Actor, input: { appointmentId: string; patientId: string }) {

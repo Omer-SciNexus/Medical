@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { assertSameOrigin, invitePerson, resendPersonInvitation, resetPersonMfa, revokePersonInvitation, revokePersonSessions, setPersonActive } from "@/modules/identity";
+import { assertSameOrigin, invitePerson, resendPersonInvitation, resetPersonMfa, revokeAccessGrant, revokePersonInvitation, revokePersonSessions, setPersonActive } from "@/modules/identity";
 import { addAvailabilityTemplate, addScheduleBlackout, extendProviderSchedule, removeAvailabilityTemplate, removeScheduleBlackout } from "@/modules/scheduling";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
@@ -69,6 +69,15 @@ export async function revokePersonSessionsAction(_previous: ActionState, form: F
   return { ok: true };
 }
 const field = (form: FormData, name: string) => String(form.get(name) ?? "");
+export async function revokeAccessGrantAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["admin"]);
+    await revokeAccessGrant(actor, { relationshipId: field(form, "relationshipId") });
+  } catch (error) { return toActionState(error); }
+  revalidatePath("/admin/access");
+  return { ok: true };
+}
 export async function addTemplateAction(_previous: ActionState, form: FormData): Promise<ActionState> {
   const values = { providerId: field(form, "providerId"), weekday: field(form, "weekday"), start: field(form, "start"), end: field(form, "end"), slotMinutes: field(form, "slotMinutes") };
   try {

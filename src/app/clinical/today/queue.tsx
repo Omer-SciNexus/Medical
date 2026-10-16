@@ -25,13 +25,16 @@ export function Queue({ entries, day, timeZone }: { entries: Entry[]; day: strin
   const [startState, startVisit, startPending] = useActionState(startVisitAction, idleAction);
   const [moveState, moveAppointment, movePending] = useActionState(advanceAppointmentAction, idleAction);
 
+  // Chart access begins at check-in, so before arrival there is nothing to request: asking
+  // would only produce a denial, which is recorded and would read here as a fault.
+  const chartAvailable = Boolean(selected && selected.status !== "booked" && selected.status !== "cancelled" && selected.status !== "no_show");
   React.useEffect(() => {
-    if (!selected) { setChart(null); return; }
+    if (!selected || !chartAvailable) { setChart(null); return; }
     let active = true;
     setLoadingChart(true);
     loadChartAction(selected.patientId).then((result) => { if (active) { setChart(result); setLoadingChart(false); } });
     return () => { active = false; };
-  }, [selected?.patientId, selected]);
+  }, [selected?.patientId, selected, chartAvailable]);
 
   const move = React.useCallback((offset: number) => {
     setSelectedId((current) => {
@@ -81,7 +84,9 @@ export function Queue({ entries, day, timeZone }: { entries: Entry[]; day: strin
           <div className="context-heading"><span className="eyebrow">Patient</span><span className="context-symbol"><ShieldCheck /></span></div>
           <p className="context-name">{clinicalName(selected.givenName, selected.surname)}</p>
           <div className="context-meta"><span>{selected.age}y</span><span>{selected.sex}</span><span className="mono">{selected.mrn}</span></div>
-          {loadingChart ? <div style={{ marginTop: 16 }}><Skeleton className="skeleton-line" /><Skeleton className="skeleton-line skeleton-short" /></div>
+          {!chartAvailable ? <p className="context-footnote" style={{ marginTop: 14 }}>
+            This chart opens when the patient is checked in. Access to read, document and prescribe is granted on arrival and recorded.</p>
+            : loadingChart ? <div style={{ marginTop: 16 }}><Skeleton className="skeleton-line" /><Skeleton className="skeleton-line skeleton-short" /></div>
             : chart?.ok === false ? <p className="field-error" style={{ marginTop: 14 }}>{chart.error}</p>
             : chart?.ok ? <>
               {chart.chart.allergies.length ? chart.chart.allergies.map((allergy) => <div key={allergy.id} className="allergy-strip">

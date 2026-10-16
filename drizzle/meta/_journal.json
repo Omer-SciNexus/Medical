@@ -50,6 +50,13 @@
       "when": 1792112895534,
       "tag": "0006_patient_portal_linking",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792113860694,
+      "tag": "0007_workflow_grants",
+      "breakpoints": true
     }
   ]
 }

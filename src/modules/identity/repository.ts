@@ -41,6 +41,38 @@ export async function hasCareRelationship(actor: Actor, patientId: string, purpo
   )).limit(1);
   return Boolean(relationship);
 }
+/**
+ * Grants standing access inside the caller's transaction, so authority and the work that
+ * needs it commit together. The partial unique index makes a repeat grant a no-op rather than
+ * a second row, and each grant is recorded.
+ */
+export async function insertCareRelationships(tx: Transaction, input: { clinicId: string; actorId: string; patientId: string; purposes: AccessPurpose[]; createdBy: string; reason: string }) {
+  const granted = await tx.insert(careRelationships)
+    .values(input.purposes.map((purpose) => ({ clinicId: input.clinicId, actorId: input.actorId, patientId: input.patientId, purpose, reason: input.reason, createdBy: input.createdBy })))
+    .onConflictDoNothing().returning({ purpose: careRelationships.purpose });
+  for (const row of granted) {
+    await appendAudit({ clinicId: input.clinicId, actorId: input.createdBy, patientId: input.patientId, action: "access.granted", purpose: row.purpose, outcome: "allowed", resourceId: input.actorId, reason: input.reason }, tx);
+  }
+  return granted.map((row) => row.purpose);
+}
+// Who currently holds access to whom. Patients stay identifiers here: an administrator may
+// see that access exists and withdraw it without being shown a name.
+export async function listLiveRelationships(clinicId: string) {
+  return getDb().select({ id: careRelationships.id, patientId: careRelationships.patientId, purpose: careRelationships.purpose, emergency: careRelationships.emergency,
+    reason: careRelationships.reason, createdAt: careRelationships.createdAt, expiresAt: careRelationships.expiresAt,
+    actorId: careRelationships.actorId, actorName: users.displayName, actorRole: users.role })
+    .from(careRelationships).innerJoin(users, and(eq(careRelationships.actorId, users.id), eq(careRelationships.clinicId, users.clinicId)))
+    .where(and(eq(careRelationships.clinicId, clinicId), isNull(careRelationships.revokedAt),
+      or(isNull(careRelationships.expiresAt), gt(careRelationships.expiresAt, new Date()))))
+    .orderBy(asc(users.displayName), asc(careRelationships.patientId), asc(careRelationships.purpose)).limit(500);
+}
+export async function revokeRelationship(clinicId: string, relationshipId: string, revokedBy: string) {
+  const [revoked] = await getDb().update(careRelationships).set({ revokedAt: new Date() })
+    .where(and(eq(careRelationships.id, relationshipId), eq(careRelationships.clinicId, clinicId), isNull(careRelationships.revokedAt)))
+    .returning({ id: careRelationships.id, patientId: careRelationships.patientId, purpose: careRelationships.purpose, actorId: careRelationships.actorId });
+  if (revoked) await appendAudit({ clinicId, actorId: revokedBy, patientId: revoked.patientId, action: "access.revoked", purpose: revoked.purpose, outcome: "allowed", resourceId: revoked.actorId });
+  return revoked;
+}
 export async function createEmergencyRelationship(actor: Actor, patientId: string, reason: string, tx: Transaction) {
   // Emergency chart review only. Prescribing and changes need normal care authority.
   await tx.insert(careRelationships).values({ clinicId: actor.clinicId, actorId: actor.id, patientId, purpose: "clinical.read", emergency: true, reason, expiresAt: new Date(Date.now() + 15 * 60_000), createdBy: actor.id });

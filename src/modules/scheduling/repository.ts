@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, eq, gt, gte, isNull, lt, ne, notExists, sql } from "drizzle-orm";
 import { getDb, type Transaction } from "@/platform/db";
-import { auditedPatientOperation, type Actor } from "@/modules/identity";
+import { auditedPatientOperation, grantWorkflowAccess, type Actor } from "@/modules/identity";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { appointments, availabilitySlots, availabilityTemplates, patients, scheduleBlackouts } from "./schema";
 import { SlotUnavailableError, StaleAppointmentError, type AppointmentStatus } from "./validators";
@@ -33,6 +33,9 @@ export async function claimSlot(actor: Actor, patientId: string, input: { slotId
       if (!slot || slot.startsAt.getTime() <= Date.now()) throw new SlotUnavailableError();
       const [appointment] = await tx.insert(appointments).values({ clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id, patientId, slotId: input.slotId, reason: input.reason,
         preparation: "Bring your current medication list and any recent test results." }).returning({ id: appointments.id });
+      // Booking is what gives the provider scheduling authority over this patient. Without it
+      // the patient would appear in a queue whose owner is then denied every read.
+      await grantWorkflowAccess(tx, { clinicId: actor.clinicId, actorId: input.providerId, patientId, purposes: ["scheduling"], grantedBy: actor.id, reason: "Appointment booked with this provider" });
       return appointment;
     }));
   } catch (error) {
@@ -61,6 +64,19 @@ export async function listProviderQueue(clinicId: string, providerId: string, fr
       gte(availabilitySlots.startsAt, from), lt(availabilitySlots.startsAt, to)))
     .orderBy(asc(availabilitySlots.startsAt)).limit(200);
 }
+/**
+ * Whether this patient is actually coming in. The front desk's authority comes from the
+ * appointment rather than from a standing grant per patient, so a colleague who joins after a
+ * booking can still run the waiting room, and their authority lapses with the visit.
+ */
+export async function hasImminentAppointment(clinicId: string, patientId: string, tx?: Transaction) {
+  const now = Date.now();
+  const [appointment] = await (tx ?? getDb()).select({ id: appointments.id }).from(appointments)
+    .innerJoin(availabilitySlots, and(eq(appointments.slotId, availabilitySlots.id), eq(appointments.clinicId, availabilitySlots.clinicId)))
+    .where(and(eq(appointments.clinicId, clinicId), eq(appointments.patientId, patientId), isNull(appointments.deletedAt), ne(appointments.status, "cancelled"),
+      gte(availabilitySlots.startsAt, new Date(now - 86_400_000)), lt(availabilitySlots.startsAt, new Date(now + 86_400_000)))).limit(1);
+  return Boolean(appointment);
+}
 export async function findAppointment(clinicId: string, appointmentId: string) {
   const [appointment] = await getDb().select({ id: appointments.id, patientId: appointments.patientId, reason: appointments.reason, status: appointments.status, revision: appointments.revision,
     startsAt: availabilitySlots.startsAt, providerId: availabilitySlots.providerId })
@@ -68,7 +84,7 @@ export async function findAppointment(clinicId: string, appointmentId: string) {
     .where(and(eq(appointments.id, appointmentId), eq(appointments.clinicId, clinicId), isNull(appointments.deletedAt))).limit(1);
   return appointment;
 }
-export async function transitionAppointment(actor: Actor, input: { appointmentId: string; patientId: string; revision: number; status: AppointmentStatus }) {
+export async function transitionAppointment(actor: Actor, input: { appointmentId: string; patientId: string; providerId: string; revision: number; status: AppointmentStatus }) {
   return getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "scheduling", `scheduling.appointment_${input.status}`, async () => {
     const [updated] = await tx.update(appointments)
       .set({ status: input.status, revision: input.revision + 1, updatedBy: actor.id, ...(input.status === "checked_in" ? { checkedInAt: new Date() } : {}) })
@@ -76,6 +92,12 @@ export async function transitionAppointment(actor: Actor, input: { appointmentId
         eq(appointments.revision, input.revision), isNull(appointments.deletedAt)))
       .returning({ id: appointments.id, revision: appointments.revision });
     if (!updated) throw new StaleAppointmentError();
+    // Arrival is when the chart opens. Authority to read, document and prescribe begins with
+    // the patient physically here, commits with the check-in itself, and stays revocable.
+    if (input.status === "checked_in") {
+      await grantWorkflowAccess(tx, { clinicId: actor.clinicId, actorId: input.providerId, patientId: input.patientId,
+        purposes: ["clinical.read", "clinical.write", "prescribe"], grantedBy: actor.id, reason: "Patient arrived for a booked appointment" });
+    }
     return updated;
   }));
 }

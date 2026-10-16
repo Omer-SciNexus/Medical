@@ -4,12 +4,12 @@ import { getDb, type Transaction } from "@/platform/db";
 import { getRedis } from "@/platform/redis";
 import { sendMail } from "@/platform/mailer";
 import { isUniqueViolation } from "@/platform/errors";
-import { resolvePatientScope } from "@/modules/scheduling";
-import { actorSchema, auditFilterSchema, emergencySchema, invitationIdSchema, inviteSchema, portalInviteSchema, purposeSchema, userIdSchema, type Actor, type AccessPurpose } from "./validators";
+import { resolveImminentVisit, resolvePatientScope } from "@/modules/scheduling";
+import { actorSchema, auditFilterSchema, emergencySchema, invitationIdSchema, inviteSchema, portalInviteSchema, purposeSchema, relationshipIdSchema, userIdSchema, type Actor, type AccessPurpose } from "./validators";
 import { roleAllowsPurpose, hasFreshTotp } from "./policy";
 import { digest, newToken } from "./crypto";
 import { revokeAllSessions } from "./sessions";
-import { appendAudit, clearMfaEnrollment, createEmergencyRelationship, createInvitation, findClinicSettings, findClinicUser, findPortalAccount, findUserByEmail, findUserById, hasCareRelationship, listAuditEvents, listClinicians, listClinicPeople, listInvitations, listPendingPatientInvitations, listPortalAccountsFor, revokeInvitation, rotateInvitation, setUserActive, verifyAuditChain } from "./repository";
+import { appendAudit, clearMfaEnrollment, createEmergencyRelationship, createInvitation, findClinicSettings, findClinicUser, findPortalAccount, findUserByEmail, findUserById, hasCareRelationship, insertCareRelationships, listAuditEvents, listClinicians, listClinicPeople, listInvitations, listLiveRelationships, listPendingPatientInvitations, listPortalAccountsFor, revokeInvitation, revokeRelationship, rotateInvitation, setUserActive, verifyAuditChain } from "./repository";
 
 export class AccessDeniedError extends Error {
   constructor() { super("You do not have permission to access this record."); this.name = "AccessDeniedError"; }
@@ -32,6 +32,10 @@ export async function assertCanAccessPatient(inputActor: Actor, inputPatientId: 
     if (actor.patientId !== patientId) return deny(actor, patientId, purpose);
     return;
   }
+  // The front desk is authorized by the visit, not by a standing grant on every patient in the
+  // clinic: a receptionist who joins today can run today's waiting room, and only scheduling
+  // work, for patients who are actually coming in. Clinical purposes always need a relationship.
+  if (actor.role === "staff" && purpose === "scheduling" && await resolveImminentVisit(actor, patientId, tx)) return;
   if (!await hasCareRelationship(actor, patientId, purpose, tx)) return deny(actor, patientId, purpose);
 }
 export async function requestBreakGlass(inputActor: Actor, input: unknown) {
@@ -39,6 +43,28 @@ export async function requestBreakGlass(inputActor: Actor, input: unknown) {
   const { patientId, reason } = emergencySchema.parse(input);
   if (actor.role !== "clinician" || !hasFreshTotp(actor) || !await currentActorIsValid(actor) || !await resolvePatientScope(actor, patientId)) return deny(actor, patientId, "break_glass");
   await getDb().transaction((tx) => createEmergencyRelationship(actor, patientId, reason, tx));
+}
+/**
+ * Called by the scheduling workflow inside its own transaction: booking grants scheduling
+ * authority to the provider, and arrival grants the attending clinical authority. A grant is
+ * an ordinary, visible, revocable row — the same rows the administrator's access list shows.
+ */
+export async function grantWorkflowAccess(tx: Transaction, input: { clinicId: string; actorId: string; patientId: string; purposes: AccessPurpose[]; grantedBy: string; reason: string }) {
+  const purposes = z.array(purposeSchema).min(1).parse(input.purposes);
+  return insertCareRelationships(tx, { clinicId: z.uuid().parse(input.clinicId), actorId: z.uuid().parse(input.actorId), patientId: z.uuid().parse(input.patientId),
+    purposes, createdBy: z.uuid().parse(input.grantedBy), reason: input.reason });
+}
+export async function listAccessGrants(inputActor: Actor) {
+  const actor = actorSchema.parse(inputActor);
+  await requireAdmin(actor);
+  await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, action: "access.registry_viewed", purpose: "administration", outcome: "allowed" });
+  return listLiveRelationships(actor.clinicId);
+}
+export async function revokeAccessGrant(inputActor: Actor, input: unknown) {
+  const actor = actorSchema.parse(inputActor);
+  await requireAdmin(actor);
+  const { relationshipId } = relationshipIdSchema.parse(input);
+  if (!await revokeRelationship(actor.clinicId, relationshipId, actor.id)) throw new PersonAdminError("That access has already ended.");
 }
 // Called by patient-data repositories inside their existing transaction.
 // This function intentionally couples access checks and durable read/write audit.
