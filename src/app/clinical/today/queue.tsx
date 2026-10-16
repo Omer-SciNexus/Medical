@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import { AlertTriangle, CheckCircle2, Inbox, Loader2, ShieldCheck, Stethoscope } from "lucide-react";
 import { Badge, Button, Skeleton } from "@/components/ui/primitives";
 import { clinicalName, clinicalDate } from "@/lib/format";
+import { useLiveRefresh } from "@/components/app/use-live-refresh";
 import { idleAction } from "@/lib/action-state";
 import { advanceAppointmentAction, loadChartAction, startVisitAction, type ChartResult } from "@/app/clinical/actions";
 
@@ -24,6 +25,8 @@ export function Queue({ entries, day, timeZone }: { entries: Entry[]; day: strin
   const selected = entries.find((entry) => entry.id === selectedId) ?? null;
   const [startState, startVisit, startPending] = useActionState(startVisitAction, idleAction);
   const [moveState, moveAppointment, movePending] = useActionState(advanceAppointmentAction, idleAction);
+  // The queue follows the waiting room, so it re-reads itself when the clinic changes.
+  const { live } = useLiveRefresh("clinic:queue", 45);
 
   // Chart access begins at check-in, so before arrival there is nothing to request: asking
   // would only produce a denial, which is recorded and would read here as a fault.
@@ -56,7 +59,7 @@ export function Queue({ entries, day, timeZone }: { entries: Entry[]; day: strin
   return <div className="specimen">
     <div className="clinical-toolbar">
       <div><h3><Stethoscope /> Today&rsquo;s clinic <span className="queue-count">{entries.length}</span></h3>
-        <p>{day} &middot; times shown in {timeZone}</p></div>
+        <p>{day} &middot; times shown in {timeZone}{live ? " · updating live" : ""}</p></div>
     </div>
     <div className="clinical-split">
       <div className="queue">

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { assertSameOrigin, invitePatientPortal, listPortalLinks } from "@/modules/identity";
 import { advanceAppointment, registerPatient, searchPatients } from "@/modules/scheduling";
 import { patientAge } from "@/modules/clinical";
+import { publishChange } from "@/platform/realtime";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
 import type { ActionState } from "@/lib/action-state";
@@ -59,6 +60,9 @@ export async function advanceFromBoardAction(_previous: ActionState, form: FormD
     await assertSameOrigin();
     const actor = await requireActor(["staff", "admin"]);
     await advanceAppointment(actor, { appointmentId: field(form, "appointmentId"), revision: Number(form.get("revision") ?? 0), status: field(form, "status") });
+    // Published after the change has committed, so nobody is nudged towards a rolled-back write.
+    await publishChange(actor.clinicId, "clinic:board");
+    await publishChange(actor.clinicId, "clinic:queue");
   } catch (error) { return toActionState(error); }
   revalidatePath("/staff/board");
   return { ok: true };

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { assertSameOrigin, requestBreakGlass } from "@/modules/identity";
 import { advanceAppointment, getAppointmentForCare } from "@/modules/scheduling";
 import { addEncounterCharge, addProblem, amendNote, AssistUnavailableError, confirmDocumentUpload, cancelPrescription, changeProblemStatus, checkPrescription, draftNoteText, draftPrescription, findMedications, finishEncounter, getPatientChart, issuePrescription, recordAllergy, recordVitals, removeEncounterCharge, requestDocumentDownload, requestDocumentUpload, saveNote, signNote, startEncounter } from "@/modules/clinical";
+import { publishChange } from "@/platform/realtime";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
 import type { ActionState } from "@/lib/action-state";
@@ -45,6 +46,8 @@ export async function advanceAppointmentAction(_previous: ActionState, form: For
     await assertSameOrigin();
     const actor = await requireActor(["clinician", "staff"]);
     await advanceAppointment(actor, { appointmentId: String(form.get("appointmentId") ?? ""), revision: Number(form.get("revision") ?? 0), status: String(form.get("status") ?? "") });
+    await publishChange(actor.clinicId, "clinic:queue");
+    await publishChange(actor.clinicId, "clinic:board");
   } catch (error) { return toActionState(error); }
   revalidatePath("/clinical/today");
   return { ok: true };

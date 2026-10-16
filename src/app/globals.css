@@ -726,6 +726,9 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 .board-summary > div { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--ink-600); }
 .board-count { font-size: 26px; font-weight: 500; color: var(--ink-900); font-variant-numeric: tabular-nums; }
 .board-summary > button { margin-left: auto; }
+.board-live { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-600); margin-left: auto; }
+.board-live svg { width: 12px; height: 12px; }
+.board-summary > button { margin-left: 0; }
 .board-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .board-list > li { display: grid; grid-template-columns: 150px 170px minmax(0, 1fr); gap: 16px; align-items: center; border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; background: var(--paper); padding: 14px 18px; }
 .board-list > li[data-state="ready"] { border-left-color: var(--accent); }

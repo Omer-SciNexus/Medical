@@ -8,7 +8,7 @@ export { readChainIntegrity, verifyChainFully, exportAuditLog } from "./service"
 export { beginSignIn, finishSignIn, registerWorkspace, acceptInvitation, describeInvitation } from "./auth";
 export { requestPasswordReset, completePasswordReset, confirmEmailVerification, resendOwnVerification, emailVerificationState, restartMfaEnrollment, reissueRecoveryCodes } from "./auth";
 export { resolveSession, revokeSession, revokeAllSessions, SESSION_COOKIE } from "./sessions";
-export { assertSameOrigin, authCookieOptions, setSessionCookie, authConfigured } from "./http";
+export { assertSameOrigin, authCookieOptions, setSessionCookie, authConfigured, allowedAuthOrigins } from "./http";
 export { hasFreshTotp } from "./policy";
 export { AuthenticationError } from "./errors";
 export { loginSchema, registrationSchema, challengeSchema, acceptInvitationSchema, passwordResetSchema, resetRequestSchema } from "./validators";
