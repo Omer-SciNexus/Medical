@@ -33,7 +33,36 @@ test("sign-in validates, preserves input, and gives an honest service status", a
     expect((await page.context().cookies()).find((cookie) => cookie.name === "meridian_session")).toBeUndefined();
   }
   await page.getByText("Need help signing in?").click();
-  await expect(page.getByText(/For a forgotten password or missing account/)).toBeVisible();
+  // A forgotten password is self-serve; only a missing account needs the administrator.
+  await expect(page.getByText(/use a saved recovery code after entering your password/)).toBeVisible();
+  await expect(page.getByText(/For a missing account, contact your clinic administrator/)).toBeVisible();
+  // The target, not a click: a soft navigation competing with the axe worker for this machine is
+  // slow in a way that says nothing about the page, which the next test visits directly.
+  await expect(page.getByRole("link", { name: "Reset it by email" })).toHaveAttribute("href", "/forgot-password");
+});
+
+test("password reset asks for an address, validates it, and promises nothing about who has an account", async ({ page }) => {
+  await page.goto("/forgot-password");
+  await expect(page.getByRole("heading", { name: "It happens." })).toBeVisible();
+  await expect(page.getByText(/single-use link/)).toBeVisible();
+  await expect(page.getByLabel("Email address")).toHaveAttribute("type", "email");
+  await page.getByRole("button", { name: "Send the link", exact: true }).click();
+  // Unconfigured, the action reports that before it validates, so which feedback appears depends
+  // on the environment; what must hold either way is that nothing is sent and no session begins.
+  if (await page.getByRole("status").filter({ hasText: "Account services are being connected" }).count()) {
+    await expect(page.getByRole("alert")).toContainText("Account services are not available");
+  } else {
+    await expect(page.getByLabel("Email address")).toHaveAttribute("aria-invalid", "true");
+  }
+  expect((await page.context().cookies()).find((cookie) => cookie.name === "meridian_session")).toBeUndefined();
+  await expect(page.getByRole("link", { name: "Back to sign-in" })).toHaveAttribute("href", "/sign-in");
+});
+
+test("a reset link that cannot be used says so instead of offering a password form", async ({ page }) => {
+  await page.goto("/reset-password");
+  await expect(page.getByRole("heading", { name: "This link cannot be used." })).toBeVisible();
+  await expect(page.getByLabel("New password")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Request a new link" })).toHaveAttribute("href", "/forgot-password");
 });
 
 test("registration validates names and confirmation without creating an account", async ({ page }) => {
@@ -66,7 +95,7 @@ test("dashboard requires a session and rejects a malformed cookie", async ({ pag
   await expect(page.getByRole("heading", { name: "Good to have you back." })).toBeVisible();
 });
 
-for (const route of ["/", "/sign-in", "/sign-up"]) test(`${route} accessibility and responsive layout`, async ({ page }) => {
+for (const route of ["/", "/sign-in", "/sign-up", "/forgot-password"]) test(`${route} accessibility and responsive layout`, async ({ page }) => {
   await page.goto(route);
   const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(result.violations).toEqual([]);
