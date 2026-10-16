@@ -714,6 +714,9 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 .invite-link { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--line)); background: var(--accent-soft); border-radius: 8px; padding: 13px 16px; margin-bottom: 20px; }
 .invite-link strong { display: block; font-weight: 500; font-size: 12px; }
 .invite-link code { font-size: 11px; color: var(--ink-600); word-break: break-all; }
+.schedule-form { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.provider-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+.provider-tabs .shortcut-button[data-active="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .auth-invitation { display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 4px; }
 .auth-invitation div { display: flex; justify-content: space-between; gap: 14px; font-size: 13px; }
 .auth-invitation dt { color: var(--ink-600); }

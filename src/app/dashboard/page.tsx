@@ -10,7 +10,7 @@ import { signOutAction } from "@/app/(auth)/actions";
 
 export const metadata: Metadata = { title: "Your workspace", robots: { index: false, follow: false } };
 // Where each role starts. Staff have no screen of their own until the waiting-room board exists.
-const entryPoint = { clinician: { href: "/clinical/today", label: "Open today’s clinic" }, patient: { href: "/patient/book", label: "Book a visit" }, admin: { href: "/admin/audit", label: "Open the access log" }, staff: null } as const;
+const entryPoint = { clinician: { href: "/clinical/today", label: "Open today’s clinic" }, patient: { href: "/patient/book", label: "Book a visit" }, admin: { href: "/admin/people", label: "Set up your clinic" }, staff: null } as const;
 
 export default async function DashboardPage() {
   const actor = await resolveSession((await cookies()).get(SESSION_COOKIE)?.value);

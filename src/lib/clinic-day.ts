@@ -9,8 +9,7 @@ function offsetMs(date: Date, timeZone: string) {
   const p = zonedParts(date, timeZone);
   return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(date.getTime() / 1000) * 1000;
 }
-/** The UTC instant of local midnight for a `YYYY-MM-DD` clinic day. */
-export function zonedStartOfDay(day: string, timeZone: string) {
+function naiveUtc(day: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
   if (!match) throw new RangeError("A clinic day must be formatted YYYY-MM-DD.");
   const [year, month, date] = match.slice(1).map(Number);
@@ -19,9 +18,23 @@ export function zonedStartOfDay(day: string, timeZone: string) {
   // Date.UTC would otherwise silently roll forward into the next month.
   const naiveDate = new Date(naive);
   if (naiveDate.getUTCFullYear() !== year || naiveDate.getUTCMonth() + 1 !== month || naiveDate.getUTCDate() !== date) throw new RangeError("A clinic day must be a real calendar date.");
-  // One correction pass, then a second to settle days whose offset changes at midnight.
+  return naive;
+}
+/** The UTC instant of a local time of day, given as minutes from local midnight. */
+export function zonedInstant(day: string, minuteOfDay: number, timeZone: string) {
+  if (!Number.isInteger(minuteOfDay) || minuteOfDay < 0 || minuteOfDay > 1440) throw new RangeError("A time of day must be whole minutes within one day.");
+  const naive = naiveUtc(day) + minuteOfDay * 60_000;
+  // One correction pass, then a second to settle times whose offset changes in between.
   const first = naive - offsetMs(new Date(naive), timeZone);
   return new Date(naive - offsetMs(new Date(first), timeZone));
+}
+/** The UTC instant of local midnight for a `YYYY-MM-DD` clinic day. */
+export function zonedStartOfDay(day: string, timeZone: string) { return zonedInstant(day, 0, timeZone); }
+/** The weekday of a clinic day, 0 being Sunday, read from the calendar date itself. */
+export function weekdayOf(day: string) { return new Date(naiveUtc(day)).getUTCDay(); }
+/** Calendar arithmetic on a clinic day, independent of any zone offset. */
+export function addClinicDays(day: string, offset: number) {
+  return new Date(naiveUtc(day) + offset * DAY_MS).toISOString().slice(0, 10);
 }
 export function clinicDayRange(day: string, timeZone: string) {
   const from = zonedStartOfDay(day, timeZone);

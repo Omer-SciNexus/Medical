@@ -1,9 +1,9 @@
 import "server-only";
-import { and, asc, eq, gte, isNull, lt, ne, notExists, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, isNull, lt, ne, notExists, sql } from "drizzle-orm";
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, type Actor } from "@/modules/identity";
-import { isUniqueViolation } from "@/platform/errors";
-import { appointments, availabilitySlots, patients } from "./schema";
+import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
+import { appointments, availabilitySlots, availabilityTemplates, patients, scheduleBlackouts } from "./schema";
 import { SlotUnavailableError, StaleAppointmentError, type AppointmentStatus } from "./validators";
 
 // Authorization metadata only. Never return clinical or demographic fields here.
@@ -85,6 +85,81 @@ export async function completeAppointment(tx: Transaction, actor: Actor, input: 
   await tx.update(appointments).set({ status: "done", revision: sql`${appointments.revision} + 1`, updatedBy: actor.id })
     .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId),
       eq(appointments.status, "in_progress"), isNull(appointments.deletedAt)));
+}
+export async function listTemplates(clinicId: string) {
+  return getDb().select({ id: availabilityTemplates.id, providerId: availabilityTemplates.providerId, weekday: availabilityTemplates.weekday,
+    startMinute: availabilityTemplates.startMinute, endMinute: availabilityTemplates.endMinute, slotMinutes: availabilityTemplates.slotMinutes })
+    .from(availabilityTemplates).where(and(eq(availabilityTemplates.clinicId, clinicId), isNull(availabilityTemplates.deletedAt)))
+    .orderBy(asc(availabilityTemplates.weekday), asc(availabilityTemplates.startMinute)).limit(500);
+}
+export async function createTemplate(actor: Actor, input: { providerId: string; weekday: number; startMinute: number; endMinute: number; slotMinutes: number }) {
+  const [template] = await getDb().insert(availabilityTemplates)
+    .values({ ...input, clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id }).returning({ id: availabilityTemplates.id });
+  return template;
+}
+export async function deleteTemplate(actor: Actor, templateId: string) {
+  const [template] = await getDb().update(availabilityTemplates).set({ deletedAt: new Date(), updatedBy: actor.id })
+    .where(and(eq(availabilityTemplates.id, templateId), eq(availabilityTemplates.clinicId, actor.clinicId), isNull(availabilityTemplates.deletedAt)))
+    .returning({ id: availabilityTemplates.id });
+  return template;
+}
+export async function listBlackouts(clinicId: string, from: Date) {
+  return getDb().select({ id: scheduleBlackouts.id, providerId: scheduleBlackouts.providerId, startsAt: scheduleBlackouts.startsAt, endsAt: scheduleBlackouts.endsAt, reason: scheduleBlackouts.reason })
+    .from(scheduleBlackouts).where(and(eq(scheduleBlackouts.clinicId, clinicId), isNull(scheduleBlackouts.deletedAt), gte(scheduleBlackouts.endsAt, from)))
+    .orderBy(asc(scheduleBlackouts.startsAt)).limit(200);
+}
+export async function deleteBlackout(actor: Actor, blackoutId: string) {
+  const [blackout] = await getDb().update(scheduleBlackouts).set({ deletedAt: new Date(), updatedBy: actor.id })
+    .where(and(eq(scheduleBlackouts.id, blackoutId), eq(scheduleBlackouts.clinicId, actor.clinicId), isNull(scheduleBlackouts.deletedAt)))
+    .returning({ id: scheduleBlackouts.id });
+  return blackout;
+}
+/**
+ * Adds a blackout and withdraws the free slots it covers. A slot with a live appointment is
+ * left alone and counted instead: the patient has to be moved before the time can be closed.
+ */
+export async function createBlackout(actor: Actor, input: { providerId: string | null; startsAt: Date; endsAt: Date; reason: string }) {
+  return getDb().transaction(async (tx) => {
+    const [blackout] = await tx.insert(scheduleBlackouts)
+      .values({ ...input, clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id }).returning({ id: scheduleBlackouts.id });
+    const covered = and(eq(availabilitySlots.clinicId, actor.clinicId), isNull(availabilitySlots.deletedAt),
+      lt(availabilitySlots.startsAt, input.endsAt), gt(availabilitySlots.endsAt, input.startsAt),
+      input.providerId ? eq(availabilitySlots.providerId, input.providerId) : undefined);
+    const booked = await tx.select({ id: availabilitySlots.id }).from(availabilitySlots)
+      .where(and(covered, sql`EXISTS (SELECT 1 FROM ${appointments} WHERE ${appointments.slotId} = ${availabilitySlots.id} AND ${appointments.deletedAt} IS NULL AND ${appointments.status} <> 'cancelled')`));
+    const withdrawn = await tx.update(availabilitySlots).set({ deletedAt: new Date(), updatedBy: actor.id })
+      .where(and(covered, notExists(tx.select({ one: sql`1` }).from(appointments).where(and(eq(appointments.slotId, availabilitySlots.id), isNull(appointments.deletedAt), ne(appointments.status, "cancelled"))))))
+      .returning({ id: availabilitySlots.id });
+    return { id: blackout.id, withdrawn: withdrawn.length, booked: booked.length };
+  });
+}
+export async function listProviderSlots(clinicId: string, providerId: string, from: Date, to: Date) {
+  return getDb().select({ id: availabilitySlots.id, startsAt: availabilitySlots.startsAt, endsAt: availabilitySlots.endsAt })
+    .from(availabilitySlots).where(and(eq(availabilitySlots.clinicId, clinicId), eq(availabilitySlots.providerId, providerId), isNull(availabilitySlots.deletedAt),
+      gte(availabilitySlots.startsAt, from), lt(availabilitySlots.startsAt, to))).orderBy(asc(availabilitySlots.startsAt)).limit(2000);
+}
+/**
+ * Inserts each candidate in its own savepoint so no_provider_slot_overlap can refuse the ones
+ * that clash — with an existing slot or with another candidate — without losing the rest.
+ * Re-running an extension is therefore safe and simply reports what was already there.
+ */
+export async function insertGeneratedSlots(actor: Actor, providerId: string, candidates: { startsAt: Date; endsAt: Date }[]) {
+  return getDb().transaction(async (tx) => {
+    let created = 0;
+    let overlapping = 0;
+    for (const candidate of candidates) {
+      try {
+        await tx.transaction(async (savepoint) => {
+          await savepoint.insert(availabilitySlots).values({ ...candidate, clinicId: actor.clinicId, providerId, createdBy: actor.id, updatedBy: actor.id });
+        });
+        created += 1;
+      } catch (error) {
+        if (!isExclusionViolation(error)) throw error;
+        overlapping += 1;
+      }
+    }
+    return { created, overlapping };
+  });
 }
 export async function findPatientIdentity(clinicId: string, patientId: string, tx?: Transaction) {
   const [patient] = await (tx ?? getDb()).select({ id: patients.id, givenName: patients.givenName, surname: patients.surname, birthDate: patients.birthDate, sex: patients.sex, mrn: patients.mrn })
