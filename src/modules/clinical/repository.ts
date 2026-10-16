@@ -3,10 +3,10 @@ import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, type Actor } from "@/modules/identity";
 import { completeAppointmentInTransaction } from "@/modules/scheduling";
-import { chargeEncounter, getEncounterCharge } from "@/modules/billing";
+import { ensureVisitCharged, getEncounterCharge } from "@/modules/billing";
 import { enqueueOutbox } from "@/platform/outbox";
 import { allergies, encounters, medications, noteVersions, observations, prescriptions, problems } from "./schema";
-import { CONSULTATION_FEE_MINOR, SOAP_TEMPLATE, encounterIsCompletable } from "./policy";
+import { SOAP_TEMPLATE, encounterIsCompletable } from "./policy";
 import { EncounterStateError, NoteConflictError, type NoteStatus } from "./validators";
 
 const noteFields = { id: noteVersions.id, version: noteVersions.version, revision: noteVersions.revision, content: noteVersions.content, template: noteVersions.template,
@@ -90,7 +90,9 @@ export async function completeEncounter(actor: Actor, input: { encounterId: stri
     if (encounter.status === "completed") return { encounter, charge: await getEncounterCharge(tx, actor.clinicId, encounter.id), repeated: true };
     const note = await findCurrentNote(actor.clinicId, encounter.id, tx);
     if (!note || !encounterIsCompletable(encounter.status, note.status as NoteStatus)) throw new EncounterStateError("Sign the visit note before completing this visit.");
-    const charge = await chargeEncounter(tx, actor, { patientId: input.patientId, encounterId: encounter.id, amountMinor: CONSULTATION_FEE_MINOR, currency: input.currency, description: "Consultation" });
+    // What the visit costs comes from the clinic's price list now: whatever was added during
+    // the visit, or its default service if nothing was.
+    const charge = await ensureVisitCharged(tx, actor, { patientId: input.patientId, encounterId: encounter.id, currency: input.currency });
     const [completed] = await tx.update(encounters).set({ status: "completed", completedAt: new Date(), summary: input.summary, publishedAt: new Date(), updatedBy: actor.id })
       .where(and(eq(encounters.id, encounter.id), eq(encounters.clinicId, actor.clinicId), eq(encounters.status, "in_progress"))).returning(encounterFields);
     if (!completed) throw new EncounterStateError("This visit was completed elsewhere. Reload to see its current state.");

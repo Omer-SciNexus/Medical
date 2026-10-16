@@ -5,12 +5,13 @@ import { AlertTriangle, CheckCircle2, ChevronRight, History, Home, Pill, Triangl
 import { AppShell } from "@/components/app/shell";
 import { Badge } from "@/components/ui/primitives";
 import { getClinicSettings } from "@/modules/identity";
-import { assistConfigured, CONSULTATION_FEE_MINOR, VITALS, getEncounterWorkspace } from "@/modules/clinical";
+import { assistConfigured, VITALS, getEncounterWorkspace } from "@/modules/clinical";
 import { clinicalDate, clinicalName } from "@/lib/format";
 import { clinicTimezone } from "@/lib/clinic-day";
 import { requireActor } from "@/app/session";
 import { NoteEditor } from "./note-editor";
 import { ChartEntry } from "./chart-entry";
+import { VisitCharges } from "./visit-charges";
 
 export const metadata: Metadata = { title: "Visit encounter", robots: { index: false, follow: false } };
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -30,7 +31,7 @@ export default async function EncounterPage({ params }: { params: Promise<{ uuid
     </div></div>
   </AppShell>;
 
-  const { encounter, patient, chart, note, history, charge } = workspace;
+  const { encounter, patient, chart, note, history, charge, invoice, priceList } = workspace;
   const activeProblems = chart.problems.filter((problem) => problem.status === "active");
   return <AppShell actor={actor} clinicName={clinic?.name ?? "Your clinic"} current="/clinical/today" breadcrumb={breadcrumb}>
     <div className="encounter-grid">
@@ -49,13 +50,23 @@ export default async function EncounterPage({ params }: { params: Promise<{ uuid
           note={{ ...note, signedAt: note.signedAt ? note.signedAt.toISOString() : null }}
           encounter={{ id: encounter.id, status: encounter.status, summary: encounter.summary, publishedAt: encounter.publishedAt ? encounter.publishedAt.toISOString() : null }}
           charge={charge ? { amountMinor: charge.amountMinor, currency: charge.currency } : null}
-          fee={{ amountMinor: CONSULTATION_FEE_MINOR, currency: clinic?.currency ?? "TRY" }}
+          fee={{ amountMinor: invoice?.amountMinor ?? 0, currency: invoice?.currency ?? clinic?.currency ?? "TRY" }}
           aiEnabled={assistConfigured()}
         />
 
         {encounter.status === "in_progress" ? <p className="row-actions" style={{ marginTop: 18 }}>
           <Link className="button button-secondary button-small" href={`/clinical/encounters/${encounter.id}/prescribe`}><Pill />Prescribe</Link>
         </p> : null}
+
+        <VisitCharges
+          encounterId={encounter.id}
+          open={encounter.status === "in_progress"}
+          currency={invoice?.currency ?? clinic?.currency ?? "TRY"}
+          status={invoice?.status ?? "pending"}
+          totalMinor={invoice?.amountMinor ?? 0}
+          lines={(invoice?.lines ?? []).map((line) => ({ id: line.id, description: line.description, quantity: line.quantity, unitAmountMinor: line.unitAmountMinor, amountMinor: line.amountMinor }))}
+          services={priceList.map((service) => ({ id: service.id, code: service.code, name: service.name, amountMinor: service.amountMinor }))}
+        />
 
         <ChartEntry
           encounterId={encounter.id}

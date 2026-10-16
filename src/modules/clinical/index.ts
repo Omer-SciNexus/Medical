@@ -2,8 +2,9 @@ export { startEncounter, getEncounterWorkspace, saveNote, signNote, amendNote, f
 export { recordVitals, addProblem, changeProblemStatus, recordAllergy } from "./service";
 export { findMedications, getPrescribingWorkspace, draftPrescription, checkPrescription, issuePrescription, cancelPrescription } from "./service";
 export { getPatientChartView, readSummaryForNotification } from "./service";
+export { addEncounterCharge, removeEncounterCharge } from "./service";
 export { safetyProviderName, safetyProviderIsFixture, FIXTURE_SOURCE } from "./safety";
 export { assistConfigured, AssistUnavailableError } from "./assist";
 export { NoteConflictError, EncounterStateError, noteDraftSchema, signNoteSchema, amendNoteSchema, completeEncounterSchema, draftRequestSchema } from "./validators";
-export { SOAP_TEMPLATE, CONSULTATION_FEE_MINOR, noteIsEditable, noteIsSignable, encounterIsCompletable, patientAge, observationFlag, observationSeverity, VITALS, vitalByKey } from "./policy";
+export { SOAP_TEMPLATE, DEFAULT_CONSULTATION_MINOR, noteIsEditable, noteIsSignable, encounterIsCompletable, patientAge, observationFlag, observationSeverity, VITALS, vitalByKey } from "./policy";
 export type { NoteStatus } from "./validators";

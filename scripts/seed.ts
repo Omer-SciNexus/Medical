@@ -8,6 +8,7 @@ import { hashPassword } from "../src/modules/identity/crypto";
 import { clinics, users, careRelationships, auditLog } from "../src/modules/identity/schema";
 import { patients, availabilitySlots, appointments } from "../src/modules/scheduling/schema";
 import { allergies, problems, observations, medications, encounters, noteVersions } from "../src/modules/clinical/schema";
+import { services } from "../src/modules/billing/schema";
 
 export const seedId = (value: number) => `00000000-0000-4000-8000-${value.toString(16).padStart(12, "0")}`;
 export const seedIds = { clinic: seedId(1), system: seedId(2), clinician: seedId(3), staff: seedId(4), admin: seedId(5), secondClinician: seedId(6), firstPatient: seedId(100), firstPatientUser: seedId(200) };
@@ -72,6 +73,13 @@ export async function seedDatabase(connectionString: string, password: string, c
           ...(i % 7 === 0 && i !== 0 ? [{ ...record, patientId, label: "HbA1c", value: "7.8", unit: "%", referenceLow: "4.0", referenceHigh: "5.6", flag: "high", observedAt }] : []),
         ]);
       }
+      // A clinic needs something on its price list before a visit can be charged.
+      await tx.insert(services).values([
+        { ...record, code: "CONSULT", name: "Consultation", amountMinor: 150_000, currency: "TRY", isDefault: true },
+        { ...record, code: "CONSULT-LONG", name: "Extended consultation", amountMinor: 240_000, currency: "TRY" },
+        { ...record, code: "DRESSING", name: "Wound dressing", amountMinor: 45_000, currency: "TRY" },
+        { ...record, code: "ECG", name: "Electrocardiogram", amountMinor: 90_000, currency: "TRY" },
+      ]);
       await tx.insert(medications).values([
         { name: "Amlodipine", ingredient: "amlodipine", strength: "5 mg", form: "tablet" },
         { name: "Metformin", ingredient: "metformin", strength: "500 mg", form: "tablet" },

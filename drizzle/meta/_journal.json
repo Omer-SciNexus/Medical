@@ -85,6 +85,13 @@
       "when": 1792118243210,
       "tag": "0011_audit_checkpoints",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792119878194,
+      "tag": "0012_price_catalogue",
+      "breakpoints": true
     }
   ]
 }

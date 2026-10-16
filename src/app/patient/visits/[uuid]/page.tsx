@@ -5,7 +5,7 @@ import { ArrowLeft, ChevronRight, Clock, FileText, Home, Receipt, TriangleAlert 
 import { AppShell } from "@/components/app/shell";
 import { getClinicSettings } from "@/modules/identity";
 import { getVisitSummary } from "@/modules/clinical";
-import { clinicalDate, patientName } from "@/lib/format";
+import { clinicalDate, money, patientName } from "@/lib/format";
 import { clinicTimezone } from "@/lib/clinic-day";
 import { requireActor } from "@/app/session";
 
@@ -28,7 +28,7 @@ export default async function VisitPage({ params }: { params: Promise<{ uuid: st
     <Link className="button button-secondary" href="/patient/book"><ArrowLeft /> Back to your care</Link>
   </div></div>);
 
-  const { summary, patient } = visit;
+  const { summary, patient, invoice } = visit;
   return shell(<>
     <div className="patient-welcome">
       <span className="patient-welcome-label"><span className="patient-welcome-line" /> Visit summary</span>
@@ -39,7 +39,18 @@ export default async function VisitPage({ params }: { params: Promise<{ uuid: st
     {summary.published ? <article className="visit-summary">
       <span className="eyebrow icon-label"><FileText /> Written and reviewed by your clinician</span>
       <div className="visit-summary-body">{summary.summary!.split("\n").filter(Boolean).map((paragraph, index) => <p key={index}>{paragraph}</p>)}</div>
-      {summary.charge ? <p className="visit-charge"><Receipt /> {summary.charge.description}: {(summary.charge.amountMinor / 100).toFixed(2)} {summary.charge.currency} &middot; {summary.charge.status}</p> : null}
+      {invoice ? <section className="patient-invoice">
+        <h2><Receipt /> What this visit cost</h2>
+        <table className="clinical-table">
+          <caption className="sr-only">Invoice for this visit</caption>
+          <thead><tr><th scope="col">Item</th><th scope="col">Quantity</th><th scope="col">Amount</th></tr></thead>
+          <tbody>{invoice.lines.map((line) => <tr key={line.id}>
+            <td>{line.description}</td><td className="numeric">{line.quantity}</td><td className="numeric">{money(line.amountMinor, invoice.currency)}</td>
+          </tr>)}</tbody>
+          <tfoot><tr><th scope="row" colSpan={2}>Total</th><td className="numeric"><strong>{money(invoice.amountMinor, invoice.currency)}</strong></td></tr></tfoot>
+        </table>
+        <p className="context-footnote">{invoice.status === "paid" ? "Settled, thank you." : invoice.status === "void" ? "This invoice has been cancelled; nothing is owed." : "Not yet settled. The front desk can take payment."}</p>
+      </section> : null}
       <p className="context-footnote">This is the summary your clinician published. It is not a prescription and does not replace advice from the clinic.</p>
     </article> : <div className="visit-pending" role="status">
       <Clock /><div><strong>Not published yet</strong>

@@ -53,3 +53,4 @@ export const issuePrescriptionSchema = z.object({
   // Length is checked again in the service, where the warning case is the one that needs it.
   overrideReason: z.string().trim().max(1_000).optional().transform((value) => value || undefined),
 });
+export const chargeLineReferenceSchema = z.object({ encounterId: z.uuid() });

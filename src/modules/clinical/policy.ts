@@ -1,8 +1,12 @@
 import type { NoteStatus } from "./validators";
 
 export const SOAP_TEMPLATE = "Subjective:\n\nObjective:\n\nAssessment:\n\nPlan:\n";
-/** Consultation fee in integer minor units, so no rounding happens in money arithmetic. */
-export const CONSULTATION_FEE_MINOR = 150_000;
+/**
+ * What a new clinic's default consultation is priced at, in integer minor units. It is a
+ * starting value for the price list, not what any visit is charged: completion reads the
+ * clinic's own catalogue.
+ */
+export const DEFAULT_CONSULTATION_MINOR = 150_000;
 
 export function noteIsEditable(status: NoteStatus) { return status === "draft"; }
 export function noteIsSignable(status: NoteStatus, content: string) { return status === "draft" && content.trim().length >= 20; }

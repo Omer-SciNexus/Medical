@@ -1,8 +1,9 @@
 import "server-only";
 import { z } from "zod";
 import { getClinicSettings, hasFreshTotp, recordScopedEvent, type Actor } from "@/modules/identity";
+import { addVisitCharge, getPriceList, getVisitInvoice, removeVisitCharge } from "@/modules/billing";
 import { getAppointmentForCare, getPatientIdentity } from "@/modules/scheduling";
-import { allergySchema, amendNoteSchema, completeEncounterSchema, draftRequestSchema, EncounterStateError, issuePrescriptionSchema, medicationSearchSchema, noteDraftSchema, openEncounterSchema, prescriptionIdSchema, prescriptionSchema, problemSchema, problemStatusSchema, signNoteSchema, vitalsSchema } from "./validators";
+import { allergySchema, amendNoteSchema, chargeLineReferenceSchema, completeEncounterSchema, draftRequestSchema, EncounterStateError, issuePrescriptionSchema, medicationSearchSchema, noteDraftSchema, openEncounterSchema, prescriptionIdSchema, prescriptionSchema, problemSchema, problemStatusSchema, signNoteSchema, vitalsSchema } from "./validators";
 import { draftVisitNote } from "./assist";
 import { checkPrescribingSafety, safetyProviderIsFixture, safetyProviderName, FIXTURE_SOURCE } from "./safety";
 import { observationSeverity, patientAge, vitalByKey } from "./policy";
@@ -35,7 +36,8 @@ export async function getEncounterWorkspace(actor: Actor, encounterId: string) {
     findChargeSummary(actor.clinicId, encounter.id),
   ]);
   if (!note) throw new EncounterStateError("This visit has no note yet.");
-  return { encounter, patient: { ...patient, age: patientAge(patient.birthDate) }, chart, note, history, charge: charge ?? null };
+  const [invoice, priceList] = await Promise.all([getVisitInvoice(actor.clinicId, encounter.id), getPriceList(actor)]);
+  return { encounter, patient: { ...patient, age: patientAge(patient.birthDate) }, chart, note, history, charge: charge ?? null, invoice: invoice ?? null, priceList };
 }
 export async function saveNote(actor: Actor, input: unknown) {
   requireClinician(actor);
@@ -187,6 +189,19 @@ export async function getPatientChartView(actor: Actor, patientId: string) {
 export async function readSummaryForNotification(clinicId: string, encounterId: string) {
   return findPublishedSummaryState(z.uuid().parse(clinicId), z.uuid().parse(encounterId));
 }
+/** Charge lines are patient writes on an open visit, so they run through the same guard. */
+export async function addEncounterCharge(actor: Actor, input: unknown) {
+  const { encounterId } = chargeLineReferenceSchema.parse(input);
+  const encounter = await requireOpenEncounter(actor, encounterId);
+  const clinic = await getClinicSettings(actor);
+  if (!clinic) throw new EncounterStateError("This clinic could not be loaded.");
+  return addVisitCharge(actor, input, { patientId: encounter.patientId, currency: clinic.currency });
+}
+export async function removeEncounterCharge(actor: Actor, input: unknown) {
+  const { encounterId } = chargeLineReferenceSchema.parse(input);
+  const encounter = await requireOpenEncounter(actor, encounterId);
+  return removeVisitCharge(actor, input, { patientId: encounter.patientId, encounterId });
+}
 export async function finishEncounter(actor: Actor, input: unknown) {
   requireClinician(actor);
   const request = completeEncounterSchema.parse(input);
@@ -221,5 +236,7 @@ export async function getVisitSummary(actor: Actor, encounterId: string) {
   const encounter = await requireEncounter(actor, encounterId);
   const [summary, patient] = await Promise.all([readPublishedSummary(actor, encounter.id, encounter.patientId), getPatientIdentity(actor, encounter.patientId)]);
   if (!summary) throw new EncounterStateError("This visit could not be found.");
-  return { summary, patient, appointmentId: encounter.appointmentId };
+  // The invoice is part of what a patient is owed an account of, so it travels with the summary.
+  const invoice = summary.published ? await getVisitInvoice(actor.clinicId, encounter.id) : undefined;
+  return { summary, patient, appointmentId: encounter.appointmentId, invoice: invoice ?? null };
 }

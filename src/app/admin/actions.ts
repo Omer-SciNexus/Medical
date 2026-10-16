@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { assertSameOrigin, invitePerson, resendPersonInvitation, resetPersonMfa, revokeAccessGrant, revokePersonInvitation, revokePersonSessions, setPersonActive } from "@/modules/identity";
+import { getClinicSettings, assertSameOrigin, invitePerson, resendPersonInvitation, resetPersonMfa, revokeAccessGrant, revokePersonInvitation, revokePersonSessions, setPersonActive } from "@/modules/identity";
 import { addAvailabilityTemplate, addScheduleBlackout, extendProviderSchedule, removeAvailabilityTemplate, removeScheduleBlackout } from "@/modules/scheduling";
+import { addService, changeServiceState, setDefaultService, settleInvoice, voidInvoice } from "@/modules/billing";
 import { retryOutboxRow } from "@/platform/outbox";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
@@ -10,6 +11,7 @@ import type { ActionState } from "@/lib/action-state";
 
 const PEOPLE = "/admin/people";
 const SCHEDULE = "/admin/schedule";
+const SERVICES = "/admin/services";
 
 export async function invitePersonAction(_previous: ActionState, form: FormData): Promise<ActionState> {
   const values = { email: String(form.get("email") ?? ""), displayName: String(form.get("displayName") ?? ""), role: String(form.get("role") ?? "") };
@@ -139,4 +141,53 @@ export async function retryOutboxAction(_previous: ActionState, form: FormData):
     revalidatePath("/admin/outbox");
     return { ok: true, notice: `${row.topic} is queued for another attempt.` };
   } catch (error) { return toActionState(error); }
+}
+
+export async function addServiceAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const values = { code: field(form, "code"), name: field(form, "name"), amountMajor: field(form, "amountMajor"), isDefault: field(form, "isDefault") };
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["admin"]);
+    const clinic = await getClinicSettings(actor);
+    await addService(actor, values, clinic?.currency ?? "TRY");
+  } catch (error) { return toActionState(error, values); }
+  revalidatePath(SERVICES);
+  return { ok: true };
+}
+export async function setServiceStateAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["admin"]);
+    await changeServiceState(actor, { serviceId: field(form, "serviceId"), active: field(form, "active") });
+  } catch (error) { return toActionState(error); }
+  revalidatePath(SERVICES);
+  return { ok: true };
+}
+export async function setDefaultServiceAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["admin"]);
+    await setDefaultService(actor, { serviceId: field(form, "serviceId") });
+  } catch (error) { return toActionState(error); }
+  revalidatePath(SERVICES);
+  return { ok: true };
+}
+export async function settleInvoiceAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["admin", "staff"]);
+    await settleInvoice(actor, { chargeId: field(form, "chargeId"), method: field(form, "method") });
+  } catch (error) { return toActionState(error); }
+  revalidatePath(SERVICES);
+  return { ok: true };
+}
+export async function voidInvoiceAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const values = { reason: field(form, "reason") };
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["admin", "staff"]);
+    await voidInvoice(actor, { chargeId: field(form, "chargeId"), ...values });
+  } catch (error) { return toActionState(error, values); }
+  revalidatePath(SERVICES);
+  return { ok: true };
 }

@@ -1,8 +1,9 @@
 import "server-only";
 import { z } from "zod";
 import { AccessDeniedError, PersonAdminError } from "@/modules/identity";
-import { SlotUnavailableError, StaleAppointmentError, ScheduleAuthoringError, AccessScopeError } from "@/modules/scheduling";
+import { SlotUnavailableError, StaleAppointmentError, ScheduleAuthoringError, PatientRegistrationError, AccessScopeError } from "@/modules/scheduling";
 import { EncounterStateError, NoteConflictError } from "@/modules/clinical";
+import { BillingError } from "@/modules/billing";
 import { logOperational } from "@/platform/log";
 import type { ActionCode, ActionState } from "@/lib/action-state";
 
@@ -13,7 +14,7 @@ const unavailable = "Something went wrong on our side. Nothing was saved. Please
 // import, and this function must never be the thing that throws.
 const speakable = (): [new (...args: never[]) => Error, ActionCode][] => [
   [NoteConflictError, "conflict"], [StaleAppointmentError, "conflict"], [SlotUnavailableError, "slot_taken"],
-  [EncounterStateError, "state"], [AccessScopeError, "state"], [PersonAdminError, "state"], [ScheduleAuthoringError, "state"],
+  [EncounterStateError, "state"], [AccessScopeError, "state"], [PersonAdminError, "state"], [ScheduleAuthoringError, "state"], [PatientRegistrationError, "state"], [BillingError, "state"],
 ];
 export function toActionState(error: unknown, values?: Record<string, string>): ActionState {
   if (error instanceof z.ZodError) return { ok: false, code: "invalid", errors: z.flattenError(error).fieldErrors, values };

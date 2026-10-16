@@ -2,6 +2,8 @@ import "server-only";
 import { TOTP, Secret } from "otpauth";
 import { z } from "zod";
 import { getRedis } from "@/platform/redis";
+import { ensureDefaultService } from "@/modules/billing";
+import { DEFAULT_CONSULTATION_MINOR } from "@/modules/clinical";
 import { sendMail } from "@/platform/mailer";
 import { isUniqueViolation } from "@/platform/errors";
 import { hashPassword, verifyPassword, digest, encryptSecret, decryptSecret, newToken, newRecoveryCodes } from "./crypto";
@@ -48,6 +50,8 @@ export async function registerWorkspace(input: unknown, trustedClientAddress: st
     if (isUniqueViolation(error)) throw new AuthenticationError("We couldn’t create this workspace. If you already have an account, sign in instead.");
     throw error;
   }
+  // A clinic with nothing on its price list could not close a visit, so it starts with one.
+  await ensureDefaultService(user.clinicId, user.id, "TRY", DEFAULT_CONSULTATION_MINOR);
   // Nothing waits on delivery: enrollment continues and the address is confirmed separately.
   if (origin) await sendEmailVerification(user.id, origin);
   return beginChallenge(user);
