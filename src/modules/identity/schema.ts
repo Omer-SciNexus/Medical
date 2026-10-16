@@ -49,6 +49,8 @@ export const invitations = pgTable("invitations", {
   email: text("email").notNull(),
   displayName: text("display_name").notNull(),
   role: roleEnum("role").notNull(),
+  /** Set only for a portal invitation, naming the patient record the account will link to. */
+  patientId: uuid("patient_id"),
   tokenHash: text("token_hash").notNull(),
   invitedBy: uuid("invited_by").notNull().references(() => users.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -57,7 +59,10 @@ export const invitations = pgTable("invitations", {
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
 }, (t) => [uniqueIndex("invitation_token_unique").on(t.tokenHash), index("invitation_clinic_lookup").on(t.clinicId, t.createdAt),
   uniqueIndex("invitation_pending_email").on(t.clinicId, t.email).where(sql`${t.consumedAt} IS NULL AND ${t.revokedAt} IS NULL`),
-  check("invitation_role", sql`${t.role} IN ('clinician', 'staff')`)]);
+  uniqueIndex("invitation_pending_patient").on(t.clinicId, t.patientId).where(sql`${t.consumedAt} IS NULL AND ${t.revokedAt} IS NULL AND ${t.patientId} IS NOT NULL`),
+  check("invitation_role", sql`${t.role} IN ('clinician', 'staff', 'patient')`),
+  // Mirrors users.patient_link_role: a patient invitation names a patient, and no other does.
+  check("invitation_patient_link_role", sql`(${t.role} = 'patient' AND ${t.patientId} IS NOT NULL) OR (${t.role} <> 'patient' AND ${t.patientId} IS NULL)`)]);
 
 export const auditLog = pgTable("audit_log", {
   id: uuid("id").defaultRandom().primaryKey(),

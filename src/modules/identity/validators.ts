@@ -24,6 +24,11 @@ export const inviteSchema = z.object({
   email: emailSchema, displayName: z.string().trim().min(2, "Enter their full name.").max(100),
   role: z.enum(["clinician", "staff"], { error: "Choose clinician or staff." }),
 });
+export const portalInviteSchema = z.object({
+  patientId: z.uuid(),
+  email: emailSchema,
+  displayName: z.string().trim().min(2, "Enter the patient's name.").max(100),
+});
 const tokenSchema = z.string().regex(/^[a-f0-9]{64}$/, "This invitation link is not valid.");
 export const acceptInvitationSchema = z.object({
   token: tokenSchema,

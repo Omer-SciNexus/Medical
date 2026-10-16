@@ -34,6 +34,19 @@ export const blackoutSchema = z.object({
 });
 export const blackoutIdSchema = z.object({ blackoutId: z.uuid() });
 
+export const patientRegistrationSchema = z.object({
+  givenName: z.string().trim().min(1, "Enter their given name.").max(80),
+  surname: z.string().trim().min(1, "Enter their surname.").max(80),
+  birthDate: clinicDay,
+  sex: z.enum(["female", "male", "intersex", "unknown"], { error: "Choose how to record sex." }),
+  // Left empty, the clinic's next number is assigned; the unique index is the authority.
+  mrn: z.string().trim().max(32).optional().transform((value) => value || undefined),
+});
+export const patientSearchSchema = z.object({ term: z.string().trim().min(2, "Enter at least two characters.").max(80) });
+
+export class PatientRegistrationError extends Error {
+  constructor(message: string) { super(message); this.name = "PatientRegistrationError"; }
+}
 export class ScheduleAuthoringError extends Error {
   constructor(message: string) { super(message); this.name = "ScheduleAuthoringError"; }
 }

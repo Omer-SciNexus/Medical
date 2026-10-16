@@ -55,11 +55,11 @@ export async function acceptInvitation(input: unknown, trustedClientAddress: str
   await throttle("invitation_address", trustedClientAddress, 20);
   await throttle("invitation_token", data.token, 6);
   const invitation = await findInvitationByTokenHash(digest(data.token));
-  if (!invitation || invitation.role === "patient" || invitation.role === "admin") throw new AuthenticationError("This invitation link is no longer valid. Ask your administrator to send a new one.");
+  if (!invitation || invitation.role === "admin") throw new AuthenticationError("This invitation link is no longer valid. Ask whoever invited you to send a new one.");
   const passwordHash = await hashPassword(data.password);
   let user: Awaited<ReturnType<typeof consumeInvitation>>;
   try {
-    user = await consumeInvitation(invitation.id, { clinicId: invitation.clinicId, email: invitation.email, displayName: invitation.displayName, role: invitation.role, passwordHash });
+    user = await consumeInvitation(invitation.id, { clinicId: invitation.clinicId, email: invitation.email, displayName: invitation.displayName, role: invitation.role, patientId: invitation.patientId, passwordHash });
   } catch (error) {
     if (isUniqueViolation(error)) throw new AuthenticationError("An account already exists for that email address. Sign in instead.");
     throw error;
@@ -71,7 +71,7 @@ export async function describeInvitation(token: string) {
   const parsed = z.string().regex(/^[a-f0-9]{64}$/).safeParse(token);
   if (!parsed.success) return null;
   const invitation = await findInvitationByTokenHash(digest(parsed.data));
-  if (!invitation || invitation.role === "patient" || invitation.role === "admin") return null;
+  if (!invitation || invitation.role === "admin") return null;
   return { displayName: invitation.displayName, email: invitation.email, role: invitation.role, expiresAt: invitation.expiresAt };
 }
 async function beginChallenge(user: NonNullable<Awaited<ReturnType<typeof findUserById>>>) {

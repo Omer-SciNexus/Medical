@@ -43,6 +43,13 @@
       "when": 1792112008569,
       "tag": "0005_availability_authoring",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792112895534,
+      "tag": "0006_patient_portal_linking",
+      "breakpoints": true
     }
   ]
 }

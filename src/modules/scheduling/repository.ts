@@ -86,6 +86,24 @@ export async function completeAppointment(tx: Transaction, actor: Actor, input: 
     .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId),
       eq(appointments.status, "in_progress"), isNull(appointments.deletedAt)));
 }
+export async function insertPatient(actor: Actor, input: { givenName: string; surname: string; birthDate: string; sex: string; mrn: string }) {
+  const [patient] = await getDb().insert(patients).values({ ...input, clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id })
+    .returning({ id: patients.id, mrn: patients.mrn });
+  return patient;
+}
+/** Highest numeric MRN in this clinic. The unique index, not this read, is the guarantee. */
+export async function highestMrnNumber(clinicId: string, prefix: string) {
+  const [row] = await getDb().select({ highest: sql<number | null>`max(nullif(regexp_replace(${patients.mrn}, '^' || ${prefix} || '(\\d+)$', '\\1'), ${patients.mrn})::bigint)` })
+    .from(patients).where(eq(patients.clinicId, clinicId));
+  return Number(row?.highest ?? 0);
+}
+export async function searchPatientsByTerm(clinicId: string, term: string) {
+  const like = `%${term.toLowerCase()}%`;
+  return getDb().select({ id: patients.id, givenName: patients.givenName, surname: patients.surname, birthDate: patients.birthDate, sex: patients.sex, mrn: patients.mrn })
+    .from(patients).where(and(eq(patients.clinicId, clinicId), isNull(patients.deletedAt),
+      sql`(lower(${patients.surname}) LIKE ${like} OR lower(${patients.givenName}) LIKE ${like} OR lower(${patients.mrn}) LIKE ${like})`))
+    .orderBy(asc(patients.surname), asc(patients.givenName)).limit(25);
+}
 export async function listTemplates(clinicId: string) {
   return getDb().select({ id: availabilityTemplates.id, providerId: availabilityTemplates.providerId, weekday: availabilityTemplates.weekday,
     startMinute: availabilityTemplates.startMinute, endMinute: availabilityTemplates.endMinute, slotMinutes: availabilityTemplates.slotMinutes })

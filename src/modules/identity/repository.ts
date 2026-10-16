@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, isNull, lt, lte, ne, or, gt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, gt, sql } from "drizzle-orm";
 import { getDb, getAuditDb, type Transaction } from "@/platform/db";
 import { auditLog, careRelationships, clinics, invitations, users } from "./schema";
 import type { Actor, AccessPurpose } from "./validators";
@@ -110,10 +110,25 @@ export async function clearMfaEnrollment(clinicId: string, userId: string, updat
   if (user) await appendAudit({ clinicId, actorId: updatedBy, action: "identity.mfa_reset", purpose: "administration", outcome: "allowed", resourceId: userId });
   return user;
 }
-export async function createInvitation(input: { clinicId: string; email: string; displayName: string; role: "clinician" | "staff"; tokenHash: string; invitedBy: string; expiresAt: Date }) {
+export async function createInvitation(input: { clinicId: string; email: string; displayName: string; role: "clinician" | "staff" | "patient"; patientId?: string | null; tokenHash: string; invitedBy: string; expiresAt: Date }) {
   const [invitation] = await getDb().insert(invitations).values(input).returning({ id: invitations.id, expiresAt: invitations.expiresAt });
-  await appendAudit({ clinicId: input.clinicId, actorId: input.invitedBy, action: "identity.invitation_created", purpose: "administration", outcome: "allowed", resourceId: invitation.id });
+  await appendAudit({ clinicId: input.clinicId, actorId: input.invitedBy, patientId: input.patientId ?? null, action: "identity.invitation_created", purpose: input.role === "patient" ? "patient.view" : "administration", outcome: "allowed", resourceId: invitation.id });
   return invitation;
+}
+export async function findPortalAccount(clinicId: string, patientId: string) {
+  const [user] = await getDb().select({ id: users.id, email: users.email, active: users.active })
+    .from(users).where(and(eq(users.clinicId, clinicId), eq(users.patientId, patientId))).limit(1);
+  return user;
+}
+export async function listPortalAccountsFor(clinicId: string, patientIds: string[]) {
+  if (!patientIds.length) return [];
+  return getDb().select({ patientId: users.patientId, id: users.id, active: users.active })
+    .from(users).where(and(eq(users.clinicId, clinicId), inArray(users.patientId, patientIds))).limit(100);
+}
+export async function listPendingPatientInvitations(clinicId: string, patientIds: string[]) {
+  if (!patientIds.length) return [];
+  return getDb().select({ id: invitations.id, patientId: invitations.patientId, email: invitations.email, expiresAt: invitations.expiresAt })
+    .from(invitations).where(and(eq(invitations.clinicId, clinicId), inArray(invitations.patientId, patientIds), isNull(invitations.consumedAt), isNull(invitations.revokedAt))).limit(100);
 }
 export async function listInvitations(clinicId: string) {
   return getDb().select({ id: invitations.id, email: invitations.email, displayName: invitations.displayName, role: invitations.role,
@@ -138,13 +153,13 @@ export async function findInvitationByTokenHash(tokenHash: string) {
 }
 // Consumes the invitation and creates the account in one transaction, so a token can never
 // back two accounts and a crash mid-way can never leave a consumed invitation without a user.
-export async function consumeInvitation(invitationId: string, input: { clinicId: string; email: string; displayName: string; role: "clinician" | "staff"; passwordHash: string }) {
+export async function consumeInvitation(invitationId: string, input: { clinicId: string; email: string; displayName: string; role: "clinician" | "staff" | "patient"; patientId: string | null; passwordHash: string }) {
   return getDb().transaction(async (tx) => {
     const [consumed] = await tx.update(invitations).set({ consumedAt: new Date() })
       .where(and(eq(invitations.id, invitationId), isNull(invitations.consumedAt), isNull(invitations.revokedAt), gt(invitations.expiresAt, new Date()))).returning({ id: invitations.id });
     if (!consumed) return undefined;
-    const [user] = await tx.insert(users).values({ clinicId: input.clinicId, email: input.email, displayName: input.displayName, role: input.role, passwordHash: input.passwordHash, patientId: null }).returning();
-    await appendAudit({ clinicId: input.clinicId, actorId: user.id, action: "identity.invitation_accepted", purpose: "administration", outcome: "allowed", resourceId: invitationId }, tx);
+    const [user] = await tx.insert(users).values({ clinicId: input.clinicId, email: input.email, displayName: input.displayName, role: input.role, passwordHash: input.passwordHash, patientId: input.patientId }).returning();
+    await appendAudit({ clinicId: input.clinicId, actorId: user.id, patientId: input.patientId, action: "identity.invitation_accepted", purpose: input.role === "patient" ? "patient.view" : "administration", outcome: "allowed", resourceId: invitationId }, tx);
     return user;
   });
 }

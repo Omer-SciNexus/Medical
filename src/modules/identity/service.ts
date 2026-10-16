@@ -5,11 +5,11 @@ import { getRedis } from "@/platform/redis";
 import { sendMail } from "@/platform/mailer";
 import { isUniqueViolation } from "@/platform/errors";
 import { resolvePatientScope } from "@/modules/scheduling";
-import { actorSchema, auditFilterSchema, emergencySchema, invitationIdSchema, inviteSchema, purposeSchema, userIdSchema, type Actor, type AccessPurpose } from "./validators";
+import { actorSchema, auditFilterSchema, emergencySchema, invitationIdSchema, inviteSchema, portalInviteSchema, purposeSchema, userIdSchema, type Actor, type AccessPurpose } from "./validators";
 import { roleAllowsPurpose, hasFreshTotp } from "./policy";
 import { digest, newToken } from "./crypto";
 import { revokeAllSessions } from "./sessions";
-import { appendAudit, clearMfaEnrollment, createEmergencyRelationship, createInvitation, findClinicSettings, findClinicUser, findUserByEmail, findUserById, hasCareRelationship, listAuditEvents, listClinicians, listClinicPeople, listInvitations, revokeInvitation, rotateInvitation, setUserActive, verifyAuditChain } from "./repository";
+import { appendAudit, clearMfaEnrollment, createEmergencyRelationship, createInvitation, findClinicSettings, findClinicUser, findPortalAccount, findUserByEmail, findUserById, hasCareRelationship, listAuditEvents, listClinicians, listClinicPeople, listInvitations, listPendingPatientInvitations, listPortalAccountsFor, revokeInvitation, rotateInvitation, setUserActive, verifyAuditChain } from "./repository";
 
 export class AccessDeniedError extends Error {
   constructor() { super("You do not have permission to access this record."); this.name = "AccessDeniedError"; }
@@ -48,10 +48,14 @@ export async function auditedPatientOperation<T>(tx: Transaction, actor: Actor, 
   await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, patientId, action, purpose, outcome: "allowed" }, tx);
   return result;
 }
-/** Audit for clinic-scoped work that resolves no single patient, such as a queue read. */
-export async function recordScopedEvent(inputActor: Actor, event: { action: string; purpose: string; resourceId?: string; reason?: string }, tx?: Transaction) {
+/**
+ * Audit for clinic-scoped work, such as a queue read. `patientId` is for the one case that
+ * cannot pass through patient authorization — creating the patient record itself — and never
+ * a way around assertCanAccessPatient for reading one.
+ */
+export async function recordScopedEvent(inputActor: Actor, event: { action: string; purpose: string; patientId?: string; resourceId?: string; reason?: string }, tx?: Transaction) {
   const actor = actorSchema.parse(inputActor);
-  await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, action: event.action, purpose: event.purpose, outcome: "allowed", resourceId: event.resourceId, reason: event.reason }, tx);
+  await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, patientId: event.patientId ?? null, action: event.action, purpose: event.purpose, outcome: "allowed", resourceId: event.resourceId, reason: event.reason }, tx);
 }
 export async function listCareProviders(inputActor: Actor) {
   const actor = actorSchema.parse(inputActor);
@@ -145,6 +149,39 @@ export async function resetPersonMfa(inputActor: Actor, input: unknown) {
   await clearMfaEnrollment(actor.clinicId, person.id, actor.id);
   // Their sessions were authenticated by the authenticator just removed.
   await revokeAllSessions(person.id);
+}
+// A portal invitation is issued by the front desk against a patient record that already
+// exists. The clinic, the role and the patient link all come from here, never from the caller.
+export async function invitePatientPortal(inputActor: Actor, input: unknown, origin: string) {
+  const actor = actorSchema.parse(inputActor);
+  if ((actor.role !== "staff" && actor.role !== "admin") || !actor.mfaVerified || !await currentActorIsValid(actor)) {
+    await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, action: "administration.denied", purpose: "administration", outcome: "denied" });
+    throw new AccessDeniedError();
+  }
+  const { patientId, email, displayName } = portalInviteSchema.parse(input);
+  if (!await resolvePatientScope(actor, patientId)) throw new PersonAdminError("That patient could not be found in this clinic.");
+  if (await findPortalAccount(actor.clinicId, patientId)) throw new PersonAdminError("That patient already has a portal account.");
+  if (await findUserByEmail(email)) throw new PersonAdminError("Someone with that email address already has an account.");
+  const token = newToken();
+  let invitation: Awaited<ReturnType<typeof createInvitation>>;
+  try {
+    invitation = await createInvitation({ clinicId: actor.clinicId, email, displayName, role: "patient", patientId, tokenHash: digest(token), invitedBy: actor.id, expiresAt: new Date(Date.now() + INVITATION_DAYS * 86_400_000) });
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new PersonAdminError("An invitation for that patient or address is already waiting. Revoke it first, or send a new link.");
+    throw error;
+  }
+  const link = invitationLink(origin, token);
+  const delivery = await sendMail({ to: email, subject: "Your clinic portal invitation",
+    text: `${displayName},\n\nYour clinic has set up a portal account for you. Open the link below within ${INVITATION_DAYS} days to choose a password and see your appointments and visit summaries.\n\n${link}\n\nIf this was not expected, ignore this message: the link is single-use and expires on its own.` });
+  return { id: invitation.id, link, delivered: delivery.delivered };
+}
+/** Which of these patients already hold a portal account, or have a link waiting. */
+export async function listPortalLinks(inputActor: Actor, patientIds: string[]) {
+  const actor = actorSchema.parse(inputActor);
+  if ((actor.role !== "staff" && actor.role !== "admin") || !actor.mfaVerified) throw new AccessDeniedError();
+  const ids = z.array(z.uuid()).max(100).parse(patientIds);
+  const [accounts, pending] = await Promise.all([listPortalAccountsFor(actor.clinicId, ids), listPendingPatientInvitations(actor.clinicId, ids)]);
+  return { accounts, pending };
 }
 export async function revokePersonSessions(inputActor: Actor, input: unknown) {
   const actor = actorSchema.parse(inputActor);

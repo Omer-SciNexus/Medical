@@ -3,11 +3,11 @@ import { z } from "zod";
 import { recordScopedEvent, type Actor } from "@/modules/identity";
 import { auditedPatientOperation } from "@/modules/identity";
 import { getDb, type Transaction } from "@/platform/db";
-import { isExclusionViolation } from "@/platform/errors";
+import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { addClinicDays, clinicDayRange, clinicTimezone, todayInZone, weekdayOf, zonedInstant, zonedStartOfDay } from "@/lib/clinic-day";
-import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, queryDaySchema, templateIdSchema, templateSchema, transitionSchema, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
+import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientRegistrationSchema, patientSearchSchema, queryDaySchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
-import { claimSlot, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findPatientIdentity, findSlot, insertGeneratedSlots, listBlackouts, listOpenSlots, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, patientIsInClinic, transitionAppointment } from "./repository";
+import { claimSlot, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findPatientIdentity, findSlot, highestMrnNumber, insertGeneratedSlots, insertPatient, listBlackouts, listOpenSlots, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
 // here would recurse. It returns only scope membership and is not a Server Action.
@@ -47,6 +47,51 @@ export async function getClinicianQueue(actor: Actor, input: unknown) {
   // any chart from it still goes through per-patient authorization.
   await recordScopedEvent(actor, { action: "scheduling.queue_read", purpose: "scheduling", reason: `${clinicDay}:${rows.length}` });
   return { day: clinicDay, timeZone, entries: rows.map((row) => ({ ...row, waitingMinutes: waitingMinutes(row.checkedInAt) })) };
+}
+function requireFrontDesk(actor: Actor) {
+  if ((actor.role !== "staff" && actor.role !== "admin") || !actor.mfaVerified) throw new AccessScopeError();
+}
+const MRN_PREFIX = "MR-";
+/**
+ * Registering a patient cannot go through patient authorization: no care relationship to this
+ * record can exist before the record does. It is recorded against the new patient all the same.
+ */
+export async function registerPatient(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const details = patientRegistrationSchema.parse(input);
+  if (details.birthDate > todayInZone(clinicTimezone())) throw new PatientRegistrationError("A date of birth cannot be in the future.");
+  if (details.mrn) {
+    try {
+      return await recordPatient(actor, { ...details, mrn: details.mrn });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new PatientRegistrationError("That medical record number is already used in this clinic.");
+      throw error;
+    }
+  }
+  // Assigning the next number races with another front desk doing the same, so the unique
+  // index decides and this retries with whatever number is now next.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const next = await highestMrnNumber(actor.clinicId, MRN_PREFIX) + 1;
+    try {
+      return await recordPatient(actor, { ...details, mrn: `${MRN_PREFIX}${next}` });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+    }
+  }
+  throw new PatientRegistrationError("The clinic's record numbers are busy right now. Try again.");
+}
+async function recordPatient(actor: Actor, input: { givenName: string; surname: string; birthDate: string; sex: string; mrn: string }) {
+  const patient = await insertPatient(actor, input);
+  await recordScopedEvent(actor, { action: "scheduling.patient_registered", purpose: "scheduling", patientId: patient.id, resourceId: patient.id });
+  return patient;
+}
+/** Searching is a patient read across the clinic, so the search itself is recorded. */
+export async function searchPatients(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { term } = patientSearchSchema.parse(input);
+  const matches = await searchPatientsByTerm(actor.clinicId, term);
+  await recordScopedEvent(actor, { action: "scheduling.patient_search", purpose: "scheduling", reason: `${matches.length}` });
+  return matches;
 }
 // Schedule authoring is an administrative act on clinic property, not on patient data, so it
 // is recorded as a clinic-scoped event rather than through patient authorization.
