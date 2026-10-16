@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ChevronRight, Home, Inbox, Link2, ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
+import { ChevronRight, Download, Home, Inbox, Link2, ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
 import { AppShell } from "@/components/app/shell";
 import { Badge, Button, Field, Input } from "@/components/ui/primitives";
 import { getClinicSettings, readAuditLog } from "@/modules/identity";
@@ -29,8 +29,9 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
     <p>Confirm the auditor database credential is configured. A failed attempt to read this log is itself recorded.</p>
   </div></div>);
 
-  const { events, integrity } = result;
+  const { events, integrity, outcomes } = result;
   const last = events.at(-1);
+  const exportHref = `/admin/audit/export?${new URLSearchParams(query)}`;
   return shell(<>
     <div className="section-header">
       <div className="section-heading"><div><span className="eyebrow icon-label"><ShieldCheck /> Administration</span>
@@ -40,11 +41,34 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
 
     <div className={integrity.brokenSeq === null ? "integrity-banner" : "integrity-banner integrity-broken"} role="status">
       {integrity.brokenSeq === null ? <ShieldCheck /> : <ShieldAlert />}
-      <div><strong>{integrity.brokenSeq === null ? `Chain verified across ${integrity.checked} events` : `Chain broken at event ${integrity.brokenSeq}`}</strong>
+      <div><strong>{integrity.brokenSeq === null
+        ? `Chain verified across ${integrity.checked} ${integrity.checked === 1 ? "event" : "events"} since the last checkpoint`
+        : `Chain broken at event ${integrity.brokenSeq}`}</strong>
         <p>{integrity.brokenSeq === null
-          ? "Each entry carries a hash of the entry before it, so any altered or removed row would break every hash after it. The log is append-only and this check recomputed the whole chain."
-          : "An entry does not match the hash of its predecessor. Treat the log as altered from this point forward and investigate the database directly."}</p></div>
+          ? "Each entry carries a hash of the entry before it, so an altered or removed row breaks every hash after it. This check starts from the last position the chain was known good at, which is why it is cheap enough to run on a page view."
+          : "An entry does not match the hash of its predecessor. Treat the log as altered from this point forward and investigate the database directly."}</p>
+        <p>{integrity.lastFullPassAt
+          ? `The whole chain was last walked ${clinicalDate(integrity.lastFullPassAt, new Date(), timeZone)}, across ${integrity.lastFullPassChecked} events. A full pass is what can see an alteration made before a checkpoint, and the worker runs one on a schedule.`
+          : "The whole chain has not been walked yet on this deployment. Until a full pass runs, this check can only speak for what has arrived since the first checkpoint."}</p></div>
     </div>
+
+    {outcomes.length ? <div className="specimen" style={{ marginBottom: 20 }}>
+      <div className="specimen-topline"><strong>Refusals and emergency access, last 30 days</strong><span>by whoever did it</span></div>
+      <div className="table-scroll">
+        <table className="clinical-table">
+          <caption className="sr-only">Denied and emergency events grouped by actor</caption>
+          <thead><tr><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Outcome</th><th scope="col">Events</th><th scope="col">Most recent</th></tr></thead>
+          <tbody>{outcomes.map((row) => <tr key={`${row.actorId}:${row.action}:${row.outcome}`}>
+            <td className="mono">{row.actorId?.slice(0, 8) ?? "system"}</td>
+            <td className="mono">{row.action}</td>
+            <td><Badge tone={outcomeTone(row.outcome)}>{row.outcome}</Badge></td>
+            <td className="numeric">{row.events}</td>
+            <td><time className="mono">{clinicalDate(row.latest, new Date(), timeZone)}</time></td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+      <div className="queue-footer"><span>A run of refusals against one actor is worth asking about; emergency access always is.</span></div>
+    </div> : null}
 
     <form className="audit-filters" method="get">
       <Field label="Actor ID" id="actorId"><Input id="actorId" name="actorId" defaultValue={filters.actorId} placeholder="uuid" className="mono" /></Field>
@@ -75,7 +99,10 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
       </div></div>
       <div className="queue-footer" style={{ margin: 0 }}>
         <span>{events.length} events shown, newest first. Reasons are recorded but not displayed in this table.</span>
-        {last ? <Link className="button button-secondary button-small" href={`/admin/audit?${new URLSearchParams({ ...query, before: String(last.seq) })}`}>Older events</Link> : null}
+        <span className="row-actions">
+          <a className="button button-ghost button-small" href={exportHref}><Download />Export CSV</a>
+          {last ? <Link className="button button-secondary button-small" href={`/admin/audit?${new URLSearchParams({ ...query, before: String(last.seq) })}`}>Older events</Link> : null}
+        </span>
       </div>
     </>}
   </>);

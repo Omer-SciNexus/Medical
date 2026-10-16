@@ -4,6 +4,7 @@ import * as React from "react";
 import { useActionState } from "react";
 import { CircleCheck, FileSignature, Loader2, PenLine, Receipt, RefreshCw, Sparkles, TriangleAlert } from "lucide-react";
 import { Button, Field, Modal, Textarea } from "@/components/ui/primitives";
+import { money } from "@/lib/format";
 import { idleAction } from "@/lib/action-state";
 import { amendNoteAction, completeVisitAction, draftNoteAction, saveNoteAction, signNoteAction } from "@/app/clinical/actions";
 
@@ -132,14 +133,14 @@ export function NoteEditor({ note, encounter, charge, fee, aiEnabled }: {
           <Textarea id="visit-summary" name="summary" rows={5} required minLength={20} defaultValue={completeState.values?.summary} />
         </Field>
         {completeState.error ? <p className="field-error" role="alert">{completeState.error}</p> : null}
-        <div className="form-footer"><span className="save-status">Charge: {(fee.amountMinor / 100).toFixed(2)} {fee.currency}, recorded once per visit.</span>
+        <div className="form-footer"><span className="save-status">Invoice so far: {money(fee.amountMinor, fee.currency)}, charged once per visit.</span>
           <Button type="submit" disabled={completePending}>{completePending ? <Loader2 /> : <CircleCheck />} Complete visit</Button></div>
       </form>
     </section> : null}
 
     {encounter.status === "completed" ? <section className="complete-visit" data-done="true">
       <h3><CircleCheck /> Visit completed</h3>
-      <p className="muted">The summary is published to the patient. {charge ? `One charge of ${(charge.amountMinor / 100).toFixed(2)} ${charge.currency} was recorded.` : "No charge was found for this visit."}</p>
+      <p className="muted">The summary is published to the patient. {charge ? `An invoice of ${money(charge.amountMinor, charge.currency)} was recorded.` : "No invoice was found for this visit."}</p>
       {encounter.summary ? <div className="review-record"><span className="eyebrow">Published summary</span><p>{encounter.summary}</p></div> : null}
     </section> : null}
   </div>;

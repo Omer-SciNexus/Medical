@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "standing_care_grant" ON "care_relationships" USING btree ("clinic_id","actor_id","patient_id","purpose") WHERE "care_relationships"."revoked_at" IS NULL AND "care_relationships"."emergency" = false;

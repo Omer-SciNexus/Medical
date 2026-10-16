@@ -1,0 +1,1 @@
+ALTER TABLE "prescriptions" ADD COLUMN "safety_findings" text[] DEFAULT '{}'::text[] NOT NULL;

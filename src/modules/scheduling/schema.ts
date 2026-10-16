@@ -20,6 +20,30 @@ export const availabilitySlots = pgTable("availability_slots", {
   endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
 }, (t) => [uniqueIndex("slots_clinic_id_unique").on(t.clinicId, t.id), index("slot_availability_lookup").on(t.clinicId, t.providerId, t.startsAt), check("slot_positive_duration", sql`${t.endsAt} > ${t.startsAt}`)]);
 
+// A weekly pattern in clinic-local minutes from midnight. Slots are generated from these;
+// overlap between two patterns for one provider is refused by no_template_overlap.
+export const availabilityTemplates = pgTable("availability_templates", {
+  ...recordColumns(),
+  providerId: uuid("provider_id").notNull(),
+  weekday: integer("weekday").notNull(),
+  startMinute: integer("start_minute").notNull(),
+  endMinute: integer("end_minute").notNull(),
+  slotMinutes: integer("slot_minutes").notNull(),
+}, (t) => [uniqueIndex("templates_clinic_id_unique").on(t.clinicId, t.id), index("template_provider_lookup").on(t.clinicId, t.providerId, t.weekday),
+  check("template_weekday", sql`${t.weekday} BETWEEN 0 AND 6`),
+  check("template_window", sql`${t.startMinute} >= 0 AND ${t.endMinute} > ${t.startMinute} AND ${t.endMinute} <= 1440`),
+  check("template_divides_evenly", sql`${t.slotMinutes} BETWEEN 5 AND 240 AND (${t.endMinute} - ${t.startMinute}) % ${t.slotMinutes} = 0`)]);
+
+export const scheduleBlackouts = pgTable("schedule_blackouts", {
+  ...recordColumns(),
+  /** Null covers the whole clinic, such as a public holiday. */
+  providerId: uuid("provider_id"),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+  reason: text("reason").notNull(),
+}, (t) => [uniqueIndex("blackouts_clinic_id_unique").on(t.clinicId, t.id), index("blackout_lookup").on(t.clinicId, t.startsAt),
+  check("blackout_positive_duration", sql`${t.endsAt} > ${t.startsAt}`)]);
+
 export const appointments = pgTable("appointments", {
   ...recordColumns(),
   patientId: uuid("patient_id").notNull(),

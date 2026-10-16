@@ -8,4 +8,10 @@ export const outbox = pgTable("outbox", {
   attempts: integer("attempts").default(0).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
-}, (t) => [uniqueIndex("outbox_idempotency").on(t.idempotencyKey), index("outbox_pending").on(t.dispatchedAt, t.createdAt)]);
+  /** When this row may next be attempted, which is how backoff is expressed. */
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+  /** Set once a row has exhausted its attempts: the dead letter an operator has to decide on. */
+  failedAt: timestamp("failed_at", { withTimezone: true }),
+  lastError: text("last_error"),
+}, (t) => [uniqueIndex("outbox_idempotency").on(t.idempotencyKey), index("outbox_pending").on(t.dispatchedAt, t.createdAt),
+  index("outbox_claimable").on(t.dispatchedAt, t.failedAt, t.nextAttemptAt)]);

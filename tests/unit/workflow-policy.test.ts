@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { canTransition, roleMayTransition, waitingMinutes } from "../../src/modules/scheduling/policy";
 import { isUniqueViolation } from "../../src/platform/errors";
 import { DrizzleQueryError } from "drizzle-orm/errors";
-import { encounterIsCompletable, noteIsEditable, noteIsSignable, observationFlag, patientAge } from "../../src/modules/clinical/policy";
+import { encounterIsCompletable, noteIsEditable, noteIsSignable, observationFlag, observationSeverity, patientAge, VITALS, vitalByKey } from "../../src/modules/clinical/policy";
 import { outboxKey } from "../../src/platform/outbox";
 
 describe("appointment transitions", () => {
@@ -89,6 +89,34 @@ describe("note and encounter state", () => {
     expect(observationFlag(84, 90, 139)).toBe("low");
     expect(observationFlag(500, null, null)).toBe("normal");
   });
+  it("escalates a reading past its critical bound, and keeps the range's own verdict otherwise", () => {
+    const systolic = vitalByKey("systolic")!;
+    expect(observationSeverity(118, systolic)).toBe("normal");
+    expect(observationSeverity(142, systolic)).toBe("high");
+    expect(observationSeverity(84, systolic)).toBe("low");
+    expect(observationSeverity(185, systolic)).toBe("critical");
+    expect(observationSeverity(78, systolic)).toBe("critical");
+    // Oxygen saturation has no upper critical bound, so a high-normal reading stays normal.
+    const oxygen = vitalByKey("oxygen_saturation")!;
+    expect(observationSeverity(100, oxygen)).toBe("normal");
+    expect(observationSeverity(92, oxygen)).toBe("low");
+    expect(observationSeverity(88, oxygen)).toBe("critical");
+    // A measurement with no reference range is never flagged.
+    expect(observationSeverity(500, vitalByKey("weight")!)).toBe("normal");
+  });
+  it("keeps every vital's catalogue entry internally consistent", () => {
+    for (const vital of VITALS) {
+      expect(vital.min).toBeLessThan(vital.max);
+      if (vital.low !== null && vital.high !== null) {
+        expect(vital.low).toBeLessThanOrEqual(vital.high);
+        expect(vital.min).toBeLessThanOrEqual(vital.low);
+        expect(vital.high).toBeLessThanOrEqual(vital.max);
+      }
+      if (vital.criticalLow !== null && vital.low !== null) expect(vital.criticalLow).toBeLessThanOrEqual(vital.low);
+      if (vital.criticalHigh !== null && vital.high !== null) expect(vital.criticalHigh).toBeGreaterThanOrEqual(vital.high);
+    }
+    expect(vitalByKey("not_a_vital")).toBeUndefined();
+  });
   it("derives age without rolling over before the birthday", () => {
     expect(patientAge("1984-06-15", new Date("2026-10-14T00:00:00Z"))).toBe(42);
     expect(patientAge("1984-10-14", new Date("2026-10-14T00:00:00Z"))).toBe(42);
@@ -98,14 +126,19 @@ describe("note and encounter state", () => {
 });
 
 describe("outbox idempotency keys", () => {
+  const encounter = "encounter.completed:00000000-0000-4000-8000-000000000500";
   it("derives the same key for the same event and different keys across events", () => {
-    const first = outboxKey("encounter.completed", "00000000-0000-4000-8000-000000000500");
-    expect(first).toBe(outboxKey("encounter.completed", "00000000-0000-4000-8000-000000000500"));
-    expect(first).not.toBe(outboxKey("visit_summary.published", "00000000-0000-4000-8000-000000000500"));
-    expect(first).not.toBe(outboxKey("encounter.completed", "00000000-0000-4000-8000-000000000501"));
+    const first = outboxKey(encounter);
+    expect(first).toBe(outboxKey(encounter));
+    expect(first).not.toBe(outboxKey("visit_summary.published:00000000-0000-4000-8000-000000000500"));
+    expect(first).not.toBe(outboxKey("encounter.completed:00000000-0000-4000-8000-000000000501"));
+  });
+  it("separates occurrences of an event that may legitimately recur for one resource", () => {
+    const appointment = "appointment.rescheduled:00000000-0000-4000-8000-000000000406";
+    expect(outboxKey(`${appointment}:2`)).not.toBe(outboxKey(`${appointment}:3`));
+    expect(outboxKey(`${appointment}:2`)).toBe(outboxKey(`${appointment}:2`));
   });
   it("produces a valid UUID so the unique index accepts it", () => {
-    expect(outboxKey("encounter.completed", "00000000-0000-4000-8000-000000000500"))
-      .toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(outboxKey(encounter)).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 });

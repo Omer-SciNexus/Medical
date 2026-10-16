@@ -8,6 +8,7 @@ import { hashPassword } from "../src/modules/identity/crypto";
 import { clinics, users, careRelationships, auditLog } from "../src/modules/identity/schema";
 import { patients, availabilitySlots, appointments } from "../src/modules/scheduling/schema";
 import { allergies, problems, observations, medications, encounters, noteVersions } from "../src/modules/clinical/schema";
+import { services } from "../src/modules/billing/schema";
 
 export const seedId = (value: number) => `00000000-0000-4000-8000-${value.toString(16).padStart(12, "0")}`;
 export const seedIds = { clinic: seedId(1), system: seedId(2), clinician: seedId(3), staff: seedId(4), admin: seedId(5), secondClinician: seedId(6), firstPatient: seedId(100), firstPatientUser: seedId(200) };
@@ -41,18 +42,21 @@ export async function seedDatabase(connectionString: string, password: string, c
       await tx.execute(sql`SELECT pg_advisory_xact_lock(71422002)`);
       if ((await tx.select({ id: clinics.id }).from(clinics).where(eq(clinics.id, seedIds.clinic))).length) return "Synthetic clinic already exists; no records changed.";
       await tx.insert(clinics).values({ id: seedIds.clinic, name: "Meridian Development Clinic", timezone: "Europe/Istanbul", currency: "TRY" });
+      // Synthetic accounts stand in for people who have already confirmed their address, so
+      // flows gated on that — inviting a colleague, for one — work in a seeded clinic.
+      const emailVerifiedAt = new Date();
       await tx.insert(users).values([
-        { id: seedIds.system, clinicId: seedIds.clinic, email: "system@example.test", displayName: "Development seed", role: "admin", passwordHash, active: false },
-        { id: seedIds.clinician, clinicId: seedIds.clinic, email: "clinician@example.test", displayName: "Dr. Selin Arslan", role: "clinician", passwordHash },
-        { id: seedIds.secondClinician, clinicId: seedIds.clinic, email: "clinician2@example.test", displayName: "Dr. Levent Erdem", role: "clinician", passwordHash },
-        { id: seedIds.staff, clinicId: seedIds.clinic, email: "staff@example.test", displayName: "Defne Özkan", role: "staff", passwordHash },
-        { id: seedIds.admin, clinicId: seedIds.clinic, email: "admin@example.test", displayName: "Deniz Altan", role: "admin", passwordHash },
+        { id: seedIds.system, clinicId: seedIds.clinic, email: "system@example.test", displayName: "Development seed", role: "admin", passwordHash, active: false, emailVerifiedAt },
+        { id: seedIds.clinician, clinicId: seedIds.clinic, email: "clinician@example.test", displayName: "Dr. Selin Arslan", role: "clinician", passwordHash, emailVerifiedAt },
+        { id: seedIds.secondClinician, clinicId: seedIds.clinic, email: "clinician2@example.test", displayName: "Dr. Levent Erdem", role: "clinician", passwordHash, emailVerifiedAt },
+        { id: seedIds.staff, clinicId: seedIds.clinic, email: "staff@example.test", displayName: "Defne Özkan", role: "staff", passwordHash, emailVerifiedAt },
+        { id: seedIds.admin, clinicId: seedIds.clinic, email: "admin@example.test", displayName: "Deniz Altan", role: "admin", passwordHash, emailVerifiedAt },
       ]);
       const record = { clinicId: seedIds.clinic, createdBy: seedIds.system, updatedBy: seedIds.system };
       for (const [i, [givenName, surname, sex]] of names.entries()) {
         const patientId = seedId(100 + i);
         await tx.insert(patients).values({ ...record, id: patientId, givenName, surname, sex, birthDate: `${1984 - (i * 7 % 32)}-${String(1 + i % 12).padStart(2, "0")}-${String(3 + i % 24).padStart(2, "0")}`, mrn: `MR-${2481 + i}` });
-        await tx.insert(users).values({ id: seedId(200 + i), clinicId: seedIds.clinic, email: i === 0 ? "patient@example.test" : `portal.${2481 + i}@example.test`, displayName: `${givenName} ${surname}`, role: "patient", patientId, passwordHash });
+        await tx.insert(users).values({ id: seedId(200 + i), clinicId: seedIds.clinic, email: i === 0 ? "patient@example.test" : `portal.${2481 + i}@example.test`, displayName: `${givenName} ${surname}`, role: "patient", patientId, passwordHash, emailVerifiedAt });
         // Only the assigned care team gains access; the admin gains no chart access.
         const providerId = i % 2 === 0 ? seedIds.clinician : seedIds.secondClinician;
         await tx.insert(careRelationships).values([
@@ -69,6 +73,13 @@ export async function seedDatabase(connectionString: string, password: string, c
           ...(i % 7 === 0 && i !== 0 ? [{ ...record, patientId, label: "HbA1c", value: "7.8", unit: "%", referenceLow: "4.0", referenceHigh: "5.6", flag: "high", observedAt }] : []),
         ]);
       }
+      // A clinic needs something on its price list before a visit can be charged.
+      await tx.insert(services).values([
+        { ...record, code: "CONSULT", name: "Consultation", amountMinor: 150_000, currency: "TRY", isDefault: true },
+        { ...record, code: "CONSULT-LONG", name: "Extended consultation", amountMinor: 240_000, currency: "TRY" },
+        { ...record, code: "DRESSING", name: "Wound dressing", amountMinor: 45_000, currency: "TRY" },
+        { ...record, code: "ECG", name: "Electrocardiogram", amountMinor: 90_000, currency: "TRY" },
+      ]);
       await tx.insert(medications).values([
         { name: "Amlodipine", ingredient: "amlodipine", strength: "5 mg", form: "tablet" },
         { name: "Metformin", ingredient: "metformin", strength: "500 mg", form: "tablet" },

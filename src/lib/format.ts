@@ -21,3 +21,8 @@ export function clinicalDate(value: Date | string, now = new Date(), timeZone = 
   else label = new Intl.DateTimeFormat("en-GB", { timeZone, day: "numeric", month: "short", year: "numeric" }).format(date);
   return `${label}, ${time}`;
 }
+
+/** Money lives in integer minor units; this is the only place it becomes a decimal. */
+export function money(amountMinor: number, currency: string, locale = "en-GB") {
+  return new Intl.NumberFormat(locale, { style: "currency", currency, currencyDisplay: "code" }).format(amountMinor / 100);
+}
