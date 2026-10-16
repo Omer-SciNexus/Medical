@@ -1,15 +1,15 @@
 import "server-only";
 import { z } from "zod";
 import { getDb, type Transaction } from "@/platform/db";
-import { getRedis } from "@/platform/redis";
 import { sendMail } from "@/platform/mailer";
+import { logOperational } from "@/platform/log";
 import { isUniqueViolation } from "@/platform/errors";
 import { resolveImminentVisit, resolvePatientScope } from "@/modules/scheduling";
 import { actorSchema, auditFilterSchema, emergencySchema, invitationIdSchema, inviteSchema, portalInviteSchema, purposeSchema, relationshipIdSchema, userIdSchema, type Actor, type AccessPurpose } from "./validators";
 import { roleAllowsPurpose, hasFreshTotp } from "./policy";
 import { digest, newToken } from "./crypto";
 import { revokeAllSessions } from "./sessions";
-import { appendAudit, clearMfaEnrollment, createEmergencyRelationship, createInvitation, findClinicSettings, findClinicUser, findPortalAccount, findUserByEmail, findUserById, hasCareRelationship, insertCareRelationships, listAuditEvents, listClinicians, listClinicPeople, listInvitations, listLiveRelationships, listPendingPatientInvitations, listPortalAccountsFor, revokeInvitation, revokeRelationship, rotateInvitation, setUserActive, verifyAuditChain } from "./repository";
+import { appendAudit, clearMfaEnrollment, createEmergencyRelationship, createInvitation, findClinicSettings, findClinicUser, findPortalAccount, findUserByEmail, findUserById, hasCareRelationship, insertCareRelationships, listAuditEvents, listClinicians, listClinicPeople, listInvitations, listLiveRelationships, listPendingPatientInvitations, listPortalAccountsFor, revokeInvitation, revokeRelationship, rotateInvitation, setUserActive, verifyAuditChainFrom, latestCheckpoint, summariseAuditOutcomes, exportAuditEvents } from "./repository";
 
 export class AccessDeniedError extends Error {
   constructor() { super("You do not have permission to access this record."); this.name = "AccessDeniedError"; }
@@ -233,21 +233,39 @@ export async function revokePersonSessions(inputActor: Actor, input: unknown) {
   await revokeAllSessions(person.id);
   await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, action: "identity.sessions_revoked", purpose: "administration", outcome: "allowed", resourceId: person.id });
 }
-export const CHAIN_INTEGRITY_CACHE_KEY = "audit:chain_integrity";
-const CHAIN_INTEGRITY_CACHE_SECONDS = 30;
-// verify_audit_chain() walks and rehashes the entire log; it is too expensive to run on every
-// page view. A short cache is a stand-in for the real fix (periodic checkpointed verification)
-// and bounds staleness to this TTL rather than recomputing on every click through the log.
-async function cachedChainIntegrity() {
-  const redis = getRedis();
-  const cached = await redis.get(CHAIN_INTEGRITY_CACHE_KEY);
-  if (cached) return JSON.parse(cached) as { checked: number; brokenSeq: number | null };
-  const result = await verifyAuditChain();
-  await redis.set(CHAIN_INTEGRITY_CACHE_KEY, JSON.stringify(result), "EX", CHAIN_INTEGRITY_CACHE_SECONDS);
+/**
+ * Integrity as the audit screen reports it: how much of the chain has been walked since the
+ * last checkpoint, and when the whole chain was last walked. The incremental check costs only
+ * the rows that have arrived since, which is what makes it affordable on a page view; the
+ * scheduled full pass is what can see an alteration made before a checkpoint.
+ */
+export async function readChainIntegrity() {
+  const [incremental, lastFull] = await Promise.all([verifyAuditChainFrom(), latestCheckpoint(true)]);
+  return {
+    checked: incremental.checked, brokenSeq: incremental.brokenSeq, fromSeq: incremental.fromSeq,
+    lastFullPassAt: lastFull?.verifiedAt ?? null, lastFullPassChecked: lastFull?.checked ?? 0,
+  };
+}
+/** The scheduled pass. Walks everything and records what it found, clean or not. */
+export async function verifyChainFully() {
+  const result = await verifyAuditChainFrom({ full: true });
+  await appendAudit({ clinicId: null, actorId: null, action: "audit.chain_verified", purpose: "audit",
+    // A broken chain is recorded as a refusal: it is the one audit outcome that is not "fine".
+    outcome: result.brokenSeq === null ? "allowed" : "denied",
+    reason: result.brokenSeq === null ? `clean:${result.checked}` : `broken:${result.brokenSeq}` });
+  if (result.brokenSeq !== null) logOperational("job.failed", { code: "AUDIT_CHAIN_BROKEN" });
   return result;
 }
 // Administrators may read the audit log. That privilege grants no chart access, and
 // reading the log is itself an audited event.
+export async function exportAuditLog(inputActor: Actor, input: unknown) {
+  const actor = actorSchema.parse(inputActor);
+  const filters = auditFilterSchema.parse(input);
+  await requireAdmin(actor);
+  const rows = await exportAuditEvents(actor.clinicId, { ...filters, limit: 5_000 });
+  await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, action: "audit.exported", purpose: "audit", outcome: "allowed", reason: `${rows.length}` });
+  return rows;
+}
 export async function readAuditLog(inputActor: Actor, input: unknown) {
   const actor = actorSchema.parse(inputActor);
   const filters = auditFilterSchema.parse(input);
@@ -256,6 +274,9 @@ export async function readAuditLog(inputActor: Actor, input: unknown) {
     throw new AccessDeniedError();
   }
   await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, patientId: filters.patientId ?? null, action: "audit.viewed", purpose: "audit", outcome: "allowed" });
-  const [events, integrity] = await Promise.all([listAuditEvents(actor.clinicId, filters), cachedChainIntegrity()]);
-  return { events, integrity };
+  const [events, integrity, outcomes] = await Promise.all([
+    listAuditEvents(actor.clinicId, filters), readChainIntegrity(),
+    summariseAuditOutcomes(actor.clinicId, new Date(Date.now() - 30 * 86_400_000)),
+  ]);
+  return { events, integrity, outcomes };
 }

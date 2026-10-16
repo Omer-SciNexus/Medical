@@ -1,5 +1,5 @@
 import "server-only";
-import { recordSystemEvent, findPortalContact } from "@/modules/identity";
+import { recordSystemEvent, findPortalContact, verifyChainFully } from "@/modules/identity";
 import { readSummaryForNotification } from "@/modules/clinical";
 import { findChargeForNotification } from "@/modules/billing";
 import { sendMail } from "@/platform/mailer";
@@ -16,6 +16,8 @@ const handlers: Record<string, (payload: JobPayload) => Promise<unknown>> = {
   "appointment.rescheduled": async (payload) => scheduleAppointmentReminders(payload.resourceId),
   "appointment.cancelled": async (payload) => scheduleAppointmentReminders(payload.resourceId),
   "appointment.reminder": async (payload) => sendAppointmentReminder({ appointmentId: payload.appointmentId, offsetHours: Number(payload.offsetHours) }),
+  // The scheduled full pass: the only check that can see an alteration made before a checkpoint.
+  "audit.verify_chain": async () => verifyChainFully(),
   "visit_summary.published": async (payload) => {
     const summary = await readSummaryForNotification(payload.clinicId, payload.resourceId);
     if (!summary?.publishedAt) return { sent: false, reason: "not published" };

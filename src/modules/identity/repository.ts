@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, gt, sql } from "drizzle-orm";
 import { getDb, getAuditDb, type Transaction } from "@/platform/db";
-import { auditLog, careRelationships, clinics, invitations, users } from "./schema";
+import { auditCheckpoints, auditLog, careRelationships, clinics, invitations, users } from "./schema";
 import type { Actor, AccessPurpose } from "./validators";
 
 export type AuditEvent = {
@@ -113,6 +113,46 @@ export async function verifyAuditChain() {
   const rows = await getAuditDb().execute<{ checked: string | number; broken_seq: string | number | null }>(sql`SELECT * FROM verify_audit_chain()`);
   const [result] = "rows" in rows ? rows.rows : (rows as unknown as { checked: string | number; broken_seq: string | number | null }[]);
   return { checked: Number(result?.checked ?? 0), brokenSeq: result?.broken_seq == null ? null : Number(result.broken_seq) };
+}
+/**
+ * Verifies from the last checkpoint rather than from the beginning, and records a new one when
+ * the walk comes back clean. `full` ignores every checkpoint and walks the whole chain, which
+ * is what the schedule runs: an alteration before a checkpoint is invisible to anything else.
+ */
+export async function verifyAuditChainFrom(options: { full?: boolean } = {}) {
+  const audit = getAuditDb();
+  const checkpoint = options.full ? undefined : await latestCheckpoint();
+  const fromSeq = checkpoint?.seq ?? 0;
+  const result = await audit.execute<{ checked: string | number; broken_seq: string | number | null; last_seq: string | number; last_hash: string | null }>(
+    sql`SELECT * FROM verify_audit_chain_from(${fromSeq}::bigint, ${checkpoint?.hash ?? null}::text)`);
+  const [row] = "rows" in result ? result.rows : (result as unknown as { checked: string | number; broken_seq: string | number | null; last_seq: string | number; last_hash: string | null }[]);
+  const checked = Number(row?.checked ?? 0);
+  const brokenSeq = row?.broken_seq == null ? null : Number(row.broken_seq);
+  const lastSeq = Number(row?.last_seq ?? fromSeq);
+  if (brokenSeq === null && row?.last_hash && lastSeq > fromSeq) {
+    await audit.insert(auditCheckpoints).values({ seq: lastSeq, hash: row.last_hash, checked: (checkpoint?.checked ?? 0) + checked, fullPass: Boolean(options.full) });
+  }
+  return { checked, brokenSeq, fromSeq, lastSeq, full: Boolean(options.full) };
+}
+export async function latestCheckpoint(onlyFull = false) {
+  const [checkpoint] = await getAuditDb().select({ seq: auditCheckpoints.seq, hash: auditCheckpoints.hash, checked: auditCheckpoints.checked,
+    fullPass: auditCheckpoints.fullPass, verifiedAt: auditCheckpoints.verifiedAt })
+    .from(auditCheckpoints).where(onlyFull ? eq(auditCheckpoints.fullPass, true) : undefined)
+    .orderBy(desc(auditCheckpoints.verifiedAt)).limit(1);
+  return checkpoint;
+}
+/** Denials and emergency access grouped by who did it: the view an administrator reviews. */
+export async function summariseAuditOutcomes(clinicId: string, since: Date) {
+  return getAuditDb().select({ actorId: auditLog.actorId, outcome: auditLog.outcome, action: auditLog.action,
+    events: sql<number>`count(*)::int`, latest: sql<Date>`max(${auditLog.createdAt})` })
+    .from(auditLog)
+    .where(and(eq(auditLog.clinicId, clinicId), gte(auditLog.createdAt, since), sql`${auditLog.outcome} IN ('denied', 'emergency')`))
+    .groupBy(auditLog.actorId, auditLog.outcome, auditLog.action)
+    .orderBy(desc(sql`count(*)`)).limit(100);
+}
+/** Export reads through the auditor credential, so it holds identifiers and never a name. */
+export async function exportAuditEvents(clinicId: string, filters: AuditFilters) {
+  return listAuditEvents(clinicId, { ...filters, limit: Math.min(filters.limit, 5_000) });
 }
 export async function consumeRecoveryCode(userId: string, codeHash: string) {
   const result = await getDb().transaction(async (tx) => {

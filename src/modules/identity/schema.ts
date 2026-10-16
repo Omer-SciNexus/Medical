@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, pgEnum, uuid, text, timestamp, boolean, bigserial, index, uniqueIndex, check } from "drizzle-orm/pg-core";
+import { pgTable, pgEnum, uuid, text, timestamp, boolean, bigint, bigserial, index, uniqueIndex, check } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("user_role", ["patient", "clinician", "staff", "admin"]);
 export const purposeEnum = pgEnum("access_purpose", ["patient.view", "scheduling", "clinical.read", "clinical.write", "prescribe"]);
@@ -90,3 +90,13 @@ export const auditLog = pgTable("audit_log", {
 }, (t) => [index("audit_clinic_time").on(t.clinicId, t.createdAt), index("audit_patient_time").on(t.patientId, t.createdAt), index("audit_actor_time").on(t.actorId, t.createdAt),
   uniqueIndex("audit_seq_unique").on(t.seq),
   check("audit_outcome", sql`${t.outcome} IN ('allowed', 'denied', 'emergency')`)]);
+
+// Written only by the auditor credential, which is the role that verifies the chain.
+export const auditCheckpoints = pgTable("audit_checkpoints", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  seq: bigint("seq", { mode: "number" }).notNull(),
+  hash: text("hash").notNull(),
+  checked: bigint("checked", { mode: "number" }).notNull(),
+  fullPass: boolean("full_pass").default(false).notNull(),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [index("audit_checkpoint_position").on(t.seq), index("audit_checkpoint_full").on(t.fullPass, t.verifiedAt)]);

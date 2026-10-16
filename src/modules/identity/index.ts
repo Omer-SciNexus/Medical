@@ -4,6 +4,7 @@ export { listPeople, invitePerson, resendPersonInvitation, revokePersonInvitatio
 export { invitePatientPortal, listPortalLinks } from "./service";
 export { grantWorkflowAccess, listAccessGrants, revokeAccessGrant } from "./service";
 export { recordSystemEvent, findPortalContact } from "./service";
+export { readChainIntegrity, verifyChainFully, exportAuditLog } from "./service";
 export { beginSignIn, finishSignIn, registerWorkspace, acceptInvitation, describeInvitation } from "./auth";
 export { requestPasswordReset, completePasswordReset, confirmEmailVerification, resendOwnVerification, emailVerificationState, restartMfaEnrollment, reissueRecoveryCodes } from "./auth";
 export { resolveSession, revokeSession, revokeAllSessions, SESSION_COOKIE } from "./sessions";

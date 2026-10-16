@@ -9,8 +9,7 @@ import { migrateDatabase } from "../../scripts/migrate";
 import { seedDatabase, seedId, seedIds } from "../../scripts/seed";
 import { encryptSecret } from "../../src/modules/identity/crypto";
 import { verifyAuditChain } from "../../src/modules/identity/repository";
-import { AccessDeniedError, CHAIN_INTEGRITY_CACHE_KEY, readAuditLog } from "../../src/modules/identity/service";
-import { getRedis } from "../../src/platform/redis";
+import { AccessDeniedError, readAuditLog, readChainIntegrity, verifyChainFully } from "../../src/modules/identity/service";
 import { advanceAppointment, bookAppointment, getClinicianQueue, getPatientIdentity, listProviderAvailability } from "../../src/modules/scheduling/service";
 import { SlotUnavailableError } from "../../src/modules/scheduling/validators";
 import { amendNote, finishEncounter, getVisitSummary, saveNote, signNote, startEncounter } from "../../src/modules/clinical/service";
@@ -204,19 +203,38 @@ describe("audit chain", () => {
     expect(shape.rows[0].lowest).toBe(1);
     expect(shape.rows[0].highest).toBe(shape.rows[0].total);
   });
-  it("serves the admin's integrity read from a short cache instead of rehashing the log every view", async () => {
-    await getRedis().del(CHAIN_INTEGRITY_CACHE_KEY);
-    const first = await readAuditLog(admin(), {});
-    expect(first.integrity).toEqual(await verifyAuditChain());
-    // Overwrite the cache with a sentinel the real recompute could never produce, so a second
-    // read within the TTL proves it came from the cache rather than the database.
-    const sentinel = { checked: 999_999, brokenSeq: null };
-    await getRedis().set(CHAIN_INTEGRITY_CACHE_KEY, JSON.stringify(sentinel), "EX", 30);
-    const second = await readAuditLog(admin(), {});
-    expect(second.integrity).toEqual(sentinel);
-    await getRedis().del(CHAIN_INTEGRITY_CACHE_KEY);
-    const third = await readAuditLog(admin(), {});
-    expect(third.integrity).toEqual(await verifyAuditChain());
+  it("gives the audit screen its events, its integrity state and its refusal summary", async () => {
+    const result = await readAuditLog(admin(), {});
+    expect(result.events.length).toBeGreaterThan(0);
+    expect(result.integrity.brokenSeq).toBeNull();
+    // Identifiers only: the auditor credential cannot resolve a name even for an administrator.
+    expect(Object.keys(result.events[0])).not.toContain("givenName");
+    expect(Array.isArray(result.outcomes)).toBe(true);
+  });
+  it("verifies from a checkpoint rather than rehashing the whole log each time", async () => {
+    // Catch up to a checkpoint first, so what this test measures is only what follows it.
+    await readChainIntegrity();
+    const checkpoint = await owner.query("SELECT seq FROM audit_checkpoints ORDER BY verified_at DESC LIMIT 1");
+    const caughtUp = await readChainIntegrity();
+    expect(caughtUp.checked).toBe(0);
+    expect(caughtUp.fromSeq).toBeGreaterThanOrEqual(Number(checkpoint.rows[0].seq));
+    // New events, and the next check walks those alone rather than the whole log.
+    const total = await owner.query("SELECT count(*)::int AS count FROM audit_log");
+    await getPatientIdentity(clinician(), seedId(100));
+    const incremental = await readChainIntegrity();
+    expect(incremental.brokenSeq).toBeNull();
+    expect(incremental.checked).toBeGreaterThan(0);
+    expect(incremental.checked).toBeLessThan(total.rows[0].count);
+    // The scheduled pass walks everything and says so.
+    const full = await verifyChainFully();
+    expect(full.full).toBe(true);
+    expect(full.fromSeq).toBe(0);
+    expect(full.checked).toBeGreaterThanOrEqual(total.rows[0].count);
+    const recorded = await owner.query("SELECT outcome, reason FROM audit_log WHERE action = 'audit.chain_verified' ORDER BY seq DESC LIMIT 1");
+    expect(recorded.rows[0]).toMatchObject({ outcome: "allowed" });
+    expect(recorded.rows[0].reason).toContain("clean:");
+    const afterFull = await owner.query("SELECT full_pass FROM audit_checkpoints ORDER BY verified_at DESC LIMIT 1");
+    expect(afterFull.rows[0].full_pass).toBe(true);
   });
   it("detects a row altered by the table owner, which append-only grants alone cannot", async () => {
     // The owner can bypass the append-only trigger; the chain is what makes that visible.
@@ -227,5 +245,14 @@ describe("audit chain", () => {
     await owner.query("ALTER TABLE audit_log ENABLE TRIGGER audit_no_mutation");
     const result = await verifyAuditChain();
     expect(result.brokenSeq).toBe(seq);
+    // A checkpoint recorded after that row was written cannot see the alteration behind it,
+    // which is exactly why the full pass exists and runs on a schedule.
+    const incremental = await readChainIntegrity();
+    expect(incremental.brokenSeq).toBeNull();
+    const full = await verifyChainFully();
+    expect(full.brokenSeq).toBe(seq);
+    const alerted = await owner.query("SELECT outcome, reason FROM audit_log WHERE action = 'audit.chain_verified' ORDER BY seq DESC LIMIT 1");
+    expect(alerted.rows[0].outcome).toBe("denied");
+    expect(alerted.rows[0].reason).toBe(`broken:${seq}`);
   });
 });

@@ -10,7 +10,7 @@ import Redis from "ioredis";
  * Kept narrow on purpose: the dispatcher's own rules (claiming, backoff, dead-lettering) are
  * what carry the risk, and they can then be exercised without a broker.
  */
-export type JobOptions = { delayMs?: number; attempts?: number };
+export type JobOptions = { delayMs?: number; attempts?: number; repeatEveryMs?: number };
 export type JobQueue = {
   add(name: string, jobId: string, data: Record<string, string>, options?: JobOptions): Promise<void>;
   remove(jobId: string): Promise<void>;
@@ -32,6 +32,7 @@ export function getJobQueue(): JobQueue {
     async add(name, jobId, data, options) {
       await queue.add(name, data, {
         jobId, delay: options?.delayMs, attempts: options?.attempts ?? 5,
+        ...(options?.repeatEveryMs ? { repeat: { every: options.repeatEveryMs } } : {}),
         backoff: { type: "exponential", delay: 10_000 },
         removeOnComplete: { age: 86_400, count: 1_000 }, removeOnFail: { age: 7 * 86_400 },
       });
