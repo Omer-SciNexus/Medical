@@ -89,7 +89,7 @@ test("registration validates names and confirmation without creating an account"
 test("dashboard requires a session and rejects a malformed cookie", async ({ page, context }) => {
   await page.goto("/dashboard");
   await expect(page).toHaveURL("/sign-in");
-  await context.addCookies([{ name: "meridian_session", value: "forged-session", url: "http://127.0.0.1:4000" }]);
+  await context.addCookies([{ name: "meridian_session", value: "forged-session", url: "http://127.0.0.1:4013" }]);
   await page.goto("/dashboard");
   await expect(page).toHaveURL("/sign-in");
   await expect(page.getByRole("heading", { name: "Good to have you back." })).toBeVisible();

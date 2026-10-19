@@ -9,8 +9,8 @@
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
-    "worker": "tsx --env-file=.env.local scripts/worker.ts",
-    "realtime": "tsx --env-file=.env.local scripts/realtime.ts",
+    "worker": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/worker.ts",
+    "realtime": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/realtime.ts",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit",
@@ -20,7 +20,8 @@
     "db:migrate": "tsx --env-file=.env.local scripts/migrate.ts",
     "db:seed": "tsx --env-file=.env.local scripts/seed.ts",
     "infra:up": "docker compose up -d --wait",
-    "infra:down": "docker compose down"
+    "infra:down": "docker compose down",
+    "storage:init": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/storage.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
@@ -65,7 +66,8 @@
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.13",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.1",
+    "testcontainers": "^12.1.0"
   },
   "overrides": {
     "postcss": "8.5.28",

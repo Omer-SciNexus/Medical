@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
 const config: NextConfig = {
   poweredByHeader: false,
@@ -13,4 +14,8 @@ const config: NextConfig = {
     ] }];
   },
 };
-export default config;
+const configure = (phase: string): NextConfig => ({ ...config,
+  distDir: process.env.MERIDIAN_E2E === "1" ? ".next-test" : phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
+});
+
+export default configure;

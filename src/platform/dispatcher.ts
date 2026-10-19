@@ -23,7 +23,7 @@ export async function dispatchOutboxBatch(limit = 20) {
   const queue = getJobQueue();
   const claimed: { id: string; topic: string; resourceId: string; clinicId: string; idempotencyKey: string; attempts: number }[] = [];
   let dispatched = 0;
-  const failures: { id: string; attempts: number; message: string }[] = [];
+  const failures: { id: string; attempts: number }[] = [];
 
   await getDb().transaction(async (tx) => {
     const rows = await tx.select({ id: outbox.id, topic: outbox.topic, resourceId: outbox.resourceId, clinicId: outbox.clinicId,
@@ -37,8 +37,8 @@ export async function dispatchOutboxBatch(limit = 20) {
       try {
         await queue.add(row.topic, row.idempotencyKey, { outboxId: row.id, clinicId: row.clinicId, resourceId: row.resourceId, topic: row.topic });
         sent.push(row.id);
-      } catch (error) {
-        failures.push({ id: row.id, attempts: row.attempts, message: error instanceof Error ? error.message : "enqueue failed" });
+      } catch {
+        failures.push({ id: row.id, attempts: row.attempts });
       }
     }
     if (sent.length) await tx.update(outbox).set({ dispatchedAt: new Date(), nextAttemptAt: null, lastError: null }).where(inArray(outbox.id, sent));
@@ -51,7 +51,7 @@ export async function dispatchOutboxBatch(limit = 20) {
     const attempts = failure.attempts + 1;
     const dead = attempts >= MAX_ATTEMPTS;
     await getDb().update(outbox)
-      .set({ attempts, lastError: failure.message.slice(0, 500), nextAttemptAt: dead ? null : new Date(Date.now() + backoffFor(attempts) * 1_000), failedAt: dead ? new Date() : null })
+      .set({ attempts, lastError: "QUEUE_ENQUEUE_FAILED", nextAttemptAt: dead ? null : new Date(Date.now() + backoffFor(attempts) * 1_000), failedAt: dead ? new Date() : null })
       .where(eq(outbox.id, failure.id));
     logOperational("job.failed", { code: dead ? "OUTBOX_DEAD_LETTER" : "OUTBOX_RETRY" });
   }

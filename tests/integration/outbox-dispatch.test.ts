@@ -97,7 +97,7 @@ describe("draining the outbox", () => {
     const row = await rowFor(key);
     expect(row.dispatched_at).toBeNull();
     expect(row.attempts).toBe(1);
-    expect(row.last_error).toContain("broker unreachable");
+    expect(row.last_error).toBe("QUEUE_ENQUEUE_FAILED");
     // Backed off, so an immediate pass does not pick it up again.
     expect(row.next_attempt_at.getTime()).toBeGreaterThan(Date.now());
     expect((await dispatchOutboxBatch()).claimed).toBe(0);

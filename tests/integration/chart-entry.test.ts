@@ -37,6 +37,7 @@ beforeAll(async () => {
   process.env.DATABASE_URL = app.toString();
   process.env.REDIS_URL = redis.getConnectionUrl();
   await owner.query("UPDATE users SET mfa_secret = $1 WHERE role <> 'patient' AND active = true", [encryptSecret("JBSWY3DPEHPK3PXP")]);
+  await owner.query("UPDATE appointments SET status='in_progress' WHERE id=$1", [appointmentId]);
   encounterId = (await startEncounter(clinician(), { appointmentId })).id;
 }, 180_000);
 
@@ -108,6 +109,8 @@ describe("problems and allergies", () => {
   });
   it("feeds what was recorded into the chart the visit reads", async () => {
     const chart = await getPatientChart(clinician(), patientId);
+    expect(chart.observations.filter((observation) => observation.encounterId === encounterId).length).toBeGreaterThan(0);
+    await expect(owner.query("UPDATE observations SET encounter_id=$1 WHERE patient_id=$2", [encounterId, seedId(102)])).rejects.toThrow(/observation_encounter_patient_fk/);
     expect(chart.observations.some((observation) => observation.label === "Systolic blood pressure" && observation.flag === "high")).toBe(true);
     expect(chart.problems.some((problem) => problem.description === "Community-acquired pneumonia" && problem.status === "resolved")).toBe(true);
   });

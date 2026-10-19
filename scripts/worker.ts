@@ -8,6 +8,7 @@ import { outboxBacklog } from "../src/platform/outbox";
 import { handlerFor, handledTopics } from "../src/jobs/registry";
 import { scheduleUpcomingReminders } from "../src/jobs/reminders";
 import { logOperational } from "../src/platform/log";
+import { closeRuntimeConnections, validateRuntime } from "../src/platform/runtime";
 
 const DISPATCH_INTERVAL_MS = Number(process.env.OUTBOX_INTERVAL_MS ?? 5_000);
 const AUDIT_PASS_INTERVAL_MS = Number(process.env.AUDIT_FULL_PASS_MS ?? 24 * 3_600_000);
@@ -47,22 +48,25 @@ export async function startWorker() {
   const dispatching = loop();
   // The chain's full verification is a schedule, not a reaction to anything: one job id, so
   // restarting the worker replaces the standing schedule rather than stacking another.
-  await getJobQueue().add("audit.verify_chain", "audit.verify_chain:daily", {}, { repeatEveryMs: AUDIT_PASS_INTERVAL_MS });
+  await getJobQueue().add("audit.verify_chain", "audit-verify-chain-daily", {}, { repeatEveryMs: AUDIT_PASS_INTERVAL_MS });
   const stop = async () => {
     stopped = true;
     await dispatching;
     await worker.close();
+    await getJobQueue().close();
   };
   return { worker, stop };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  validateRuntime("worker");
+  if (process.argv.includes("--check")) { console.log("worker imports and configuration verified."); process.exit(0); }
   const started = await startWorker();
   // Visits booked while nothing was running still need their reminders.
   const caught = await scheduleUpcomingReminders().catch(() => ({ appointments: 0, scheduled: 0 }));
   const backlog = await outboxBacklog();
   console.log(`Worker running. Topics: ${handledTopics().join(", ")}. Outbox pending ${backlog.pending}, dead ${backlog.dead}. Reminders scheduled for ${caught.appointments} upcoming visits.`);
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.on(signal, () => { void started.stop().then(() => process.exit(0)); });
+    process.on(signal, () => { void started.stop().then(closeRuntimeConnections).then(() => process.exit(0)); });
   }
 }

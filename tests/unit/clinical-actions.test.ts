@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mock = vi.hoisted(() => ({
-  sameOrigin: vi.fn(), requireActor: vi.fn(), startEncounter: vi.fn(), advanceAppointment: vi.fn(), getAppointmentForCare: vi.fn(),
+  sameOrigin: vi.fn(), requireActor: vi.fn(), startEncounter: vi.fn(), advanceAppointment: vi.fn(), getAppointmentForCare: vi.fn(), publish: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw new Error(`REDIRECT:${url}`); } }));
+vi.mock("@/platform/realtime", () => ({ publishChange: mock.publish }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/app/session", () => ({ requireActor: mock.requireActor }));
 vi.mock("@/modules/identity", async (importOriginal) => ({ ...(await importOriginal<object>()), assertSameOrigin: mock.sameOrigin }));
@@ -26,16 +27,16 @@ describe("startVisitAction", () => {
   it("opens the encounter and redirects once the appointment advances", async () => {
     mock.advanceAppointment.mockResolvedValue({ id: "appointment-1", revision: 5 });
     await expect(startVisitAction({}, form({ appointmentId: "appointment-1", revision: "4" }))).rejects.toThrow("REDIRECT:/clinical/encounters/encounter-1");
-    expect(mock.getAppointmentForCare).not.toHaveBeenCalled();
+    expect(mock.startEncounter).toHaveBeenCalledWith(actor, { appointmentId: "appointment-1", revision: 4 });
+    expect(mock.advanceAppointment).not.toHaveBeenCalled();
   });
   it("still redirects when the appointment was already advanced by an earlier submission", async () => {
-    mock.advanceAppointment.mockRejectedValue(new StaleAppointmentError());
-    mock.getAppointmentForCare.mockResolvedValue({ id: "appointment-1", status: "in_progress" });
+    // The domain transaction handles idempotent retries.
+    mock.startEncounter.mockResolvedValue({ id: "encounter-1", appointmentId: "appointment-1" });
     await expect(startVisitAction({}, form({ appointmentId: "appointment-1", revision: "4" }))).rejects.toThrow("REDIRECT:/clinical/encounters/encounter-1");
   });
   it("surfaces a genuine transition failure instead of silently proceeding to bill an unstarted visit", async () => {
-    mock.advanceAppointment.mockRejectedValue(new StaleAppointmentError());
-    mock.getAppointmentForCare.mockResolvedValue({ id: "appointment-1", status: "ready" });
+    mock.startEncounter.mockRejectedValue(new StaleAppointmentError());
     const result = await startVisitAction({}, form({ appointmentId: "appointment-1", revision: "4" }));
     expect(result.error).toContain("Reload to see its current state");
     expect(result.ok).not.toBe(true);

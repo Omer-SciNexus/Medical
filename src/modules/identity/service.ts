@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
 import { getDb, type Transaction } from "@/platform/db";
 import { sendMail } from "@/platform/mailer";
 import { logOperational } from "@/platform/log";
@@ -69,6 +70,8 @@ export async function revokeAccessGrant(inputActor: Actor, input: unknown) {
 // Called by patient-data repositories inside their existing transaction.
 // This function intentionally couples access checks and durable read/write audit.
 export async function auditedPatientOperation<T>(tx: Transaction, actor: Actor, patientId: string, purpose: AccessPurpose, action: string, operation: () => Promise<T>): Promise<T> {
+  // Serialize clinical mutations for a patient so checks and writes see a consistent chart.
+  if (purpose === "clinical.write" || purpose === "prescribe") await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${patientId}, 0))`);
   await assertCanAccessPatient(actor, patientId, purpose, tx);
   const result = await operation();
   await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, patientId, action, purpose, outcome: "allowed" }, tx);
@@ -279,4 +282,20 @@ export async function readAuditLog(inputActor: Actor, input: unknown) {
     summariseAuditOutcomes(actor.clinicId, new Date(Date.now() - 30 * 86_400_000)),
   ]);
   return { events, integrity, outcomes };
+}
+
+/** Financial administration is clinic-scoped and does not grant any clinical chart purpose. */
+export async function assertClinicRole(input: Actor, roles: Actor["role"][], tx?: Transaction) {
+  const actor = actorSchema.parse(input);
+  if (!roles.includes(actor.role) || !actor.mfaVerified || !await currentActorIsValid(actor, tx)) {
+    await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, action: "administration.denied", purpose: "administration", outcome: "denied" });
+    throw new AccessDeniedError();
+  }
+}
+export async function auditedBillingOperation<T>(tx: Transaction, actor: Actor, patientId: string, action: string, operation: () => Promise<T>) {
+  await assertClinicRole(actor, ["staff", "admin"], tx);
+  if (!await resolvePatientScope(actor, z.uuid().parse(patientId), tx)) return deny(actor, patientId, "billing");
+  const result = await operation();
+  await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, patientId, action, purpose: "billing", outcome: "allowed" }, tx);
+  return result;
 }
