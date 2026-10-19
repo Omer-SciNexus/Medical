@@ -2,6 +2,14 @@
 
 Local branch: `fix/clinic-workflow-reliability`. Changes have not been pushed or deployed. This section supersedes the older verification snapshot below.
 
+## CI storage dependency correction
+
+Both supplied GitHub Actions logs report 206 passing tests and one failed suite: the object-store setup cannot pull `minio/minio:RELEASE.2025-04-22T22-12-26Z`. Its two tests never execute. This is an unavailable external test image, not a Git merge conflict or an application assertion failure. The expected audit-tampering, queue retry and mail-503 messages belong to passing failure-path tests; the PostgreSQL query deprecation warning is separate.
+
+Compose and Testcontainers now share `docker/minio/Dockerfile`, which builds the same MinIO release from official commit `0d7408fc9969caf07de6a8c3a84f9fbb10a6739e` and verifies the source archive SHA-256. This follows the upstream source-only distribution model (https://github.com/minio/minio#source-only-distribution). No GitHub permissions change or registry login is required by this approach. Storage assertions remain enabled; only that suite's setup timeout increases to allow a cold source build, with the CI job budget extended to 30 minutes. Individual test assertion timeouts remain unchanged.
+
+Validation: TypeScript, lint, Compose configuration and whitespace checks passed. The standard local Testcontainers run stalled while listing existing containers, before the image build, and was stopped. A separate direct Docker build successfully pulled its base images and verified the pinned source checksum, but was stopped after dependency downloads ceased making visible progress. The two storage assertions have not yet run against the replacement image. A new GitHub Actions run is required. This correction has not been committed or pushed.
+
 ## Implemented in this pass
 
 - Development, production and browser-test builds use separate output directories. Browser tests own port 4013. Worker/realtime commands load local configuration under the React server condition, validate required settings and close runtime connections on shutdown.

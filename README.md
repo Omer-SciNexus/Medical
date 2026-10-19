@@ -14,6 +14,8 @@ The reliability pass adds serialized autosave, atomic signing and visit transiti
 
 Needs Node.js 22 or newer and Docker with Linux-container support.
 
+MinIO is built locally from the official source commit for `RELEASE.2025-04-22T22-12-26Z`; the old upstream container image is no longer available. Compose and the object-store integration tests share [docker/minio/Dockerfile](docker/minio/Dockerfile). The first build downloads Go dependencies and compiles MinIO, so allow several minutes and outbound HTTPS access. Later builds can reuse Docker layers. This image is for the existing synthetic development/test environment.
+
 ```powershell
 npm.cmd ci
 Copy-Item .env.example .env.local

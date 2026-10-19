@@ -1,16 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GenericContainer, Wait, type StartedTestContainer } from "testcontainers";
+import { fileURLToPath } from "node:url";
 import { ensureBucket, headObject, presignDownload, presignUpload } from "../../src/platform/objects";
 let store: StartedTestContainer;
 beforeAll(async () => {
-  store = await new GenericContainer("minio/minio:RELEASE.2025-04-22T22-12-26Z")
+  // Upstream no longer publishes this image. Build the pinned official source instead.
+  const container = await GenericContainer.fromDockerfile(fileURLToPath(new URL("../../docker/minio", import.meta.url)))
+    .withBuildkit().build();
+  store = await container
     .withEnvironment({ MINIO_ROOT_USER: "test-minio-user", MINIO_ROOT_PASSWORD: "test-minio-secret", MINIO_API_CORS_ALLOW_ORIGIN: "http://127.0.0.1:4013" })
     .withCommand(["server", "/data"]).withExposedPorts(9000).withWaitStrategy(Wait.forHttp("/minio/health/live", 9000)).start();
   process.env.MINIO_ENDPOINT = `http://${store.getHost()}:${store.getMappedPort(9000)}`;
   process.env.MINIO_ACCESS_KEY = "test-minio-user"; process.env.MINIO_SECRET_KEY = "test-minio-secret";
   process.env.MINIO_BUCKET = "document-tests";
   await ensureBucket();
-}, 120_000);
+}, 1_200_000); // Allow a cold source/toolchain build; test assertion timeouts stay unchanged.
 afterAll(async () => { await store?.stop(); });
 describe("real object store", () => {
   it("creates the bucket once and preserves a file against a second upload", async () => {
