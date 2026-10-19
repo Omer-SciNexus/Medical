@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { AuthenticationError, acceptInvitation, assertSameOrigin, authConfigured, authCookieOptions, beginSignIn, completePasswordReset, finishSignIn, registerWorkspace, requestPasswordReset, revokeSession, SESSION_COOKIE, setSessionCookie } from "@/modules/identity";
+import { AuthenticationError, clientAddress, acceptInvitation, assertSameOrigin, authConfigured, authCookieOptions, beginSignIn, completePasswordReset, finishSignIn, registerWorkspace, requestPasswordReset, revokeSession, SESSION_COOKIE, setSessionCookie } from "@/modules/identity";
 import type { AuthFormState } from "@/lib/auth-form-state";
 import { logOperational } from "@/platform/log";
 
@@ -39,10 +39,10 @@ async function credentialsAction(form: FormData, mode: "sign-in" | "sign-up" | "
     const schema = mode === "sign-up" ? registrationSchema : mode === "accept-invite" ? acceptInvitationSchema : loginSchema;
     const data = schema.parse(Object.fromEntries(form));
     if (!authConfigured()) return { step: "credentials", error: unavailable };
-    // Conservative shared bucket; never trust a client-supplied forwarding header for rate limits.
-    const result = mode === "sign-up" ? await registerWorkspace(data, "public-web", origin)
-      : mode === "accept-invite" ? await acceptInvitation(data, "public-web")
-      : await beginSignIn(data, "public-web");
+    // Without an explicitly trusted proxy header, retain the shared safe fallback.
+    const result = mode === "sign-up" ? await registerWorkspace(data, await clientAddress(), origin)
+      : mode === "accept-invite" ? await acceptInvitation(data, await clientAddress())
+      : await beginSignIn(data, await clientAddress());
     state = await acceptResult(result);
   } catch (error) { return failure(error, "credentials"); }
   if (state) return state;
@@ -73,7 +73,7 @@ export async function requestResetAction(_previous: ResetState, form: FormData):
   try {
     const origin = await assertSameOrigin();
     if (!authConfigured()) return { error: unavailable };
-    await requestPasswordReset({ email: String(form.get("email") ?? "") }, "public-web", origin);
+    await requestPasswordReset({ email: String(form.get("email") ?? "") }, await clientAddress(), origin);
     return { sent: true };
   } catch (error) {
     if (error instanceof z.ZodError) return { errors: z.flattenError(error).fieldErrors };
@@ -86,7 +86,7 @@ export async function completeResetAction(_previous: ResetState, form: FormData)
   try {
     await assertSameOrigin();
     if (!authConfigured()) return { error: unavailable };
-    await completePasswordReset({ token: String(form.get("token") ?? ""), password: String(form.get("password") ?? ""), confirmPassword: String(form.get("confirmPassword") ?? "") }, "public-web");
+    await completePasswordReset({ token: String(form.get("token") ?? ""), password: String(form.get("password") ?? ""), confirmPassword: String(form.get("confirmPassword") ?? "") }, await clientAddress());
     // Sessions are already gone; drop any cookie this browser still holds.
     const jar = await cookies();
     jar.delete(SESSION_COOKIE);

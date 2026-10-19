@@ -22,10 +22,10 @@ async function requireEncounter(actor: Actor, encounterId: string) {
 }
 export async function startEncounter(actor: Actor, input: unknown) {
   requireClinician(actor);
-  const { appointmentId } = openEncounterSchema.parse(input);
+  const { appointmentId, revision } = openEncounterSchema.parse(input);
   const appointment = await getAppointmentForCare(actor, appointmentId);
   if (appointment.status === "cancelled" || appointment.status === "no_show") throw new EncounterStateError("This appointment is no longer active.");
-  return openEncounter(actor, { appointmentId, patientId: appointment.patientId });
+  return openEncounter(actor, { appointmentId, patientId: appointment.patientId, revision });
 }
 export async function getEncounterWorkspace(actor: Actor, encounterId: string) {
   requireClinician(actor);
@@ -127,6 +127,7 @@ export async function checkPrescription(actor: Actor, input: unknown) {
   requireClinician(actor);
   const prescription = await requirePrescription(actor, prescriptionId);
   if (prescription.status !== "draft") throw new EncounterStateError("This prescription is no longer a draft.");
+  const checkedAt = new Date();
   const chart = await readChart(actor, prescription.patientId);
   const current = await listEncounterPrescriptions(actor.clinicId, prescription.encounterId);
   const verdict = await checkPrescribingSafety({
@@ -135,7 +136,7 @@ export async function checkPrescription(actor: Actor, input: unknown) {
     allergies: chart.allergies.map((allergy) => ({ substance: allergy.substance, severity: allergy.severity })),
     current: current.filter((row) => row.id !== prescription.id && row.status !== "cancelled").map((row) => ({ ingredient: row.ingredient, name: row.name })),
   });
-  const checked = await recordSafetyCheck(actor, { prescriptionId, patientId: prescription.patientId, status: verdict.status, source: verdict.source, findings: verdict.findings });
+  const checked = await recordSafetyCheck(actor, { prescriptionId, patientId: prescription.patientId, status: verdict.status, source: verdict.source, findings: verdict.findings, checkedAt });
   if (!checked) throw new EncounterStateError("This prescription is no longer a draft.");
   return verdict;
 }
@@ -155,12 +156,15 @@ export async function issuePrescription(actor: Actor, input: unknown) {
   if (prescription.safetySource === FIXTURE_SOURCE) {
     throw new EncounterStateError("This build's safety check is a synthetic fixture, so nothing it clears may be issued. Configure a real safety service first.");
   }
+  if (!prescription.safetyCheckedAt || Date.now() - prescription.safetyCheckedAt.getTime() > 15 * 60_000 || prescription.safetyCheckedAt.getTime() > Date.now()) {
+    throw new EncounterStateError("This safety check has expired. Run it again before issuing.");
+  }
   if (prescription.safetyStatus === "warning") {
     if (!hasFreshTotp(actor)) throw new EncounterStateError("Overriding a warning needs a fresh authenticator check. Sign in again, then issue.");
     if (!overrideReason || overrideReason.length < 20) throw new EncounterStateError("Record at least 20 characters explaining why this warning is being overridden.");
   }
   const issued = await issuePrescriptionRow(actor, { prescriptionId, patientId: prescription.patientId,
-    overrideReason: prescription.safetyStatus === "warning" ? overrideReason ?? null : null, expectedSafety: prescription.safetyStatus });
+    overrideReason: prescription.safetyStatus === "warning" ? overrideReason ?? null : null, expectedSafety: prescription.safetyStatus, expectedSource: prescription.safetySource!, checkedAt: prescription.safetyCheckedAt });
   if (!issued) throw new EncounterStateError("This prescription changed while you were reviewing it. Reload and check it again.");
   return issued;
 }
@@ -274,7 +278,7 @@ export async function draftNoteText(actor: Actor, input: unknown) {
   ]);
   await recordScopedEvent(actor, { action: "clinical.draft_assisted", purpose: "clinical.write", resourceId: encounter.id });
   return draftVisitNote({ reason: appointment.reason, age: patientAge(patient.birthDate), sex: patient.sex,
-    allergies: chart.allergies, problems: chart.problems, observations: chart.observations, clinicianNotes: observations });
+    allergies: chart.allergies, problems: chart.problems, observations: chart.observations.filter((reading) => reading.encounterId === encounter.id), clinicianNotes: observations });
 }
 export async function getPatientChart(actor: Actor, patientId: string) {
   return readChart(actor, z.uuid().parse(patientId));

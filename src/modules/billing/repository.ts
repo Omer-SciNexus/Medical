@@ -75,20 +75,20 @@ export async function insertChargeLine(tx: Transaction, actor: Actor, input: { c
     .returning({ id: chargeLines.id, amountMinor: chargeLines.amountMinor });
   return line;
 }
-export async function removeChargeLine(actor: Actor, chargeId: string, lineId: string) {
-  const [line] = await getDb().update(chargeLines).set({ deletedAt: new Date(), updatedBy: actor.id })
+export async function removeChargeLine(tx: Transaction, actor: Actor, chargeId: string, lineId: string) {
+  const [line] = await tx.update(chargeLines).set({ deletedAt: new Date(), updatedBy: actor.id })
     .where(and(eq(chargeLines.id, lineId), eq(chargeLines.clinicId, actor.clinicId), eq(chargeLines.chargeId, chargeId), isNull(chargeLines.deletedAt)))
     .returning({ id: chargeLines.id });
   return line;
 }
-export async function settleCharge(actor: Actor, chargeId: string, method: string) {
-  const [charge] = await getDb().update(charges).set({ status: "paid", paidAt: new Date(), paidMethod: method, updatedBy: actor.id })
+export async function settleCharge(tx: Transaction, actor: Actor, chargeId: string, method: string) {
+  const [charge] = await tx.update(charges).set({ status: "paid", paidAt: new Date(), paidMethod: method, updatedBy: actor.id })
     .where(and(eq(charges.id, chargeId), eq(charges.clinicId, actor.clinicId), eq(charges.status, "pending"), isNull(charges.deletedAt)))
     .returning({ id: charges.id, amountMinor: charges.amountMinor, patientId: charges.patientId, status: charges.status });
   return charge;
 }
-export async function voidChargeRow(actor: Actor, chargeId: string, reason: string) {
-  const [charge] = await getDb().update(charges).set({ status: "void", voidReason: reason, updatedBy: actor.id })
+export async function voidChargeRow(tx: Transaction, actor: Actor, chargeId: string, reason: string) {
+  const [charge] = await tx.update(charges).set({ status: "void", voidReason: reason, updatedBy: actor.id })
     .where(and(eq(charges.id, chargeId), eq(charges.clinicId, actor.clinicId), eq(charges.status, "pending"), isNull(charges.deletedAt)))
     .returning({ id: charges.id, patientId: charges.patientId, status: charges.status });
   return charge;
@@ -99,15 +99,15 @@ export async function findChargeById(clinicId: string, chargeId: string) {
     .from(charges).where(and(eq(charges.id, chargeId), eq(charges.clinicId, clinicId), isNull(charges.deletedAt))).limit(1);
   return charge;
 }
-export async function listClinicCharges(clinicId: string, status?: string) {
-  return getDb().select({ id: charges.id, encounterId: charges.encounterId, patientId: charges.patientId, amountMinor: charges.amountMinor,
+export async function listClinicCharges(clinicId: string, status?: string, tx?: Transaction) {
+  return (tx ?? getDb()).select({ id: charges.id, encounterId: charges.encounterId, patientId: charges.patientId, amountMinor: charges.amountMinor,
     currency: charges.currency, status: charges.status, paidAt: charges.paidAt, createdAt: charges.createdAt })
     .from(charges).where(and(eq(charges.clinicId, clinicId), isNull(charges.deletedAt), status ? eq(charges.status, status) : undefined))
     .orderBy(sql`${charges.createdAt} DESC`).limit(200);
 }
 export async function findChargeForEncounter(tx: Transaction, clinicId: string, encounterId: string) {
   const [charge] = await tx.select({ id: charges.id, amountMinor: charges.amountMinor, currency: charges.currency, status: charges.status, description: charges.description })
-    .from(charges).where(and(eq(charges.encounterId, encounterId), eq(charges.clinicId, clinicId))).limit(1);
+    .from(charges).where(and(eq(charges.encounterId, encounterId), eq(charges.clinicId, clinicId))).for("update").limit(1);
   return charge;
 }
 /** System-level read for the notification worker, which has no actor and no transaction. */

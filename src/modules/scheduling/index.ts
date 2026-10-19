@@ -1,4 +1,4 @@
-export { resolvePatientScope, resolveImminentVisit, listProviderAvailability, bookAppointment, listMyAppointments, getClinicianQueue, advanceAppointment, completeAppointmentInTransaction, getAppointmentForCare, getPatientIdentity, AccessScopeError } from "./service";
+export { resolvePatientScope, resolveImminentVisit, listProviderAvailability, bookAppointment, listMyAppointments, listMyAppointmentPage, getClinicianQueue, advanceAppointment, beginAppointmentInTransaction, completeAppointmentInTransaction, getAppointmentForCare, getPatientIdentity, AccessScopeError } from "./service";
 export { getScheduleAuthoring, addAvailabilityTemplate, removeAvailabilityTemplate, addScheduleBlackout, removeScheduleBlackout, extendProviderSchedule, getProviderSlotCount } from "./service";
 export { registerPatient, searchPatients } from "./service";
 export { reschedulePatientAppointment, listMyAppointmentOptions } from "./service";

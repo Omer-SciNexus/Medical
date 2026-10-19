@@ -31,6 +31,7 @@ services:
     environment:
       MINIO_ROOT_USER: meridian-local
       MINIO_ROOT_PASSWORD: local-object-store-only
+      MINIO_API_CORS_ALLOW_ORIGIN: http://127.0.0.1:4000,http://localhost:4000,http://127.0.0.1:4013
     ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
     volumes: ["minio_data:/data"]
     healthcheck:

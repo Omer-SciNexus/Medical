@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { FileText, Loader2, Paperclip, Upload } from "lucide-react";
 import { Badge, Button, Field, Input } from "@/components/ui/primitives";
 import { clinicalDate } from "@/lib/format";
@@ -13,6 +14,7 @@ const size = (bytes: number) => bytes < 1_048_576 ? `${Math.round(bytes / 1024)}
 export function Attachments({ patientId, documents, configured, timeZone }: {
   patientId: string; documents: Document[]; configured: boolean; timeZone: string;
 }) {
+  const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -32,13 +34,14 @@ export function Attachments({ patientId, documents, configured, timeZone }: {
     try {
       const ticket = await startUploadAction({ patientId, kind, filename: chosen.name, contentType: chosen.type, byteSize: chosen.size });
       if (!ticket.ok) { setError(ticket.error); return; }
-      const sent = await fetch(ticket.uploadUrl, { method: "PUT", headers: { "content-type": ticket.contentType }, body: chosen });
+      const sent = await fetch(ticket.uploadUrl, { method: "PUT", headers: { "content-type": ticket.contentType, "if-none-match": "*" }, body: chosen });
       if (!sent.ok) { setError("The file could not be stored. Try again."); return; }
       const confirmed = await confirmUploadAction(ticket.documentId);
       if (!confirmed.ok) { setError(confirmed.error); return; }
       setNotice(`${confirmed.filename} is on the chart.`);
+      router.refresh();
       if (file.current) file.current.value = "";
-    } finally { setBusy(false); }
+    } catch { setError("The upload could not finish. Check your connection and try again."); } finally { setBusy(false); }
   }
   async function open(documentId: string) {
     setError(null);

@@ -20,7 +20,7 @@ export const problems = pgTable("problems", {
 }, (t) => [index("problem_patient").on(t.clinicId, t.patientId), check("problem_status", sql`${t.status} IN ('active', 'resolved')`)]);
 
 export const observations = pgTable("observations", {
-  ...recordColumns(), patientId: uuid("patient_id").notNull(), label: text("label").notNull(),
+  ...recordColumns(), encounterId: uuid("encounter_id"), patientId: uuid("patient_id").notNull(), label: text("label").notNull(),
   value: numeric("value").notNull(), unit: text("unit").notNull(),
   referenceLow: numeric("reference_low"), referenceHigh: numeric("reference_high"),
   flag: text("flag").default("normal").notNull(), observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),

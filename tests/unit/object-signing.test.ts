@@ -28,7 +28,7 @@ describe("presigned object URLs", () => {
   it("signs the content type into an upload, so a caller cannot store something else", () => {
     const asPdf = presignUpload(key, "application/pdf");
     const asPng = presignUpload(key, "image/png");
-    expect(parse(asPdf.url).searchParams.get("X-Amz-SignedHeaders")).toBe("content-type;host");
+    expect(parse(asPdf.url).searchParams.get("X-Amz-SignedHeaders")).toBe("content-type;host;if-none-match");
     expect(parse(asPdf.url).searchParams.get("X-Amz-Signature")).not.toBe(parse(asPng.url).searchParams.get("X-Amz-Signature"));
   });
   it("signs only the host for a download, and expires it sooner than an upload", () => {
@@ -46,7 +46,7 @@ describe("presigned object URLs", () => {
   });
   it("escapes each path segment without escaping the separators", () => {
     const url = parse(presignDownload("clinic one/patient two/a file (1).pdf").url);
-    expect(url.pathname).toBe("/meridian-documents/clinic%20one/patient%20two/a%20file%20(1).pdf");
+    expect(url.pathname).toBe("/meridian-documents/clinic%20one/patient%20two/a%20file%20%281%29.pdf");
   });
   it("reports whether storage is configured at all, and refuses to sign when it is not", () => {
     expect(objectStoreConfigured()).toBe(true);

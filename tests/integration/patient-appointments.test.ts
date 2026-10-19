@@ -8,7 +8,7 @@ import { readFile } from "node:fs/promises";
 import { migrateDatabase } from "../../scripts/migrate";
 import { seedDatabase, seedId, seedIds } from "../../scripts/seed";
 import { encryptSecret } from "../../src/modules/identity/crypto";
-import { advanceAppointment, bookAppointment, listMyAppointments, listProviderAvailability, reschedulePatientAppointment, AccessScopeError } from "../../src/modules/scheduling/service";
+import { advanceAppointment, bookAppointment, getWaitingRoomBoard, listMyAppointmentPage, listMyAppointments, listProviderAvailability, reschedulePatientAppointment, AccessScopeError } from "../../src/modules/scheduling/service";
 import { SlotUnavailableError, StaleAppointmentError } from "../../src/modules/scheduling/validators";
 import type { Actor } from "../../src/modules/identity/validators";
 
@@ -148,5 +148,32 @@ describe("cancelling", () => {
     }
     await expect(advanceAppointment(patient(18), { appointmentId: booked.id, revision: state.revision, status: "cancelled" })).rejects.toThrow();
     expect((await slotOf(booked.id)).status).toBe("booked");
+  });
+});
+
+describe("appointment pagination and clinic timezone", () => {
+  it("keeps upcoming visits visible after more than 100 historical records", async () => {
+    const actor = patient(20);
+    const slots = await listProviderAvailability(actor, { providerId: seedIds.clinician, days: 21 });
+    const booked = await bookAppointment(actor, { providerId: seedIds.clinician, slotId: slots[0].id, reason: "Upcoming pagination regression" });
+    await owner.query(`INSERT INTO appointments (clinic_id, created_by, updated_by, patient_id, slot_id, reason, status)
+      SELECT $1, $2, $2, $3, $4, 'Historical cancellation', 'cancelled' FROM generate_series(1, 101)`,
+      [seedIds.clinic, seedIds.system, actor.patientId, seedId(300)]);
+    const upcoming = await listMyAppointmentPage(actor, { view: "upcoming", number: 1 });
+    expect(upcoming.entries.some((row) => row.id === booked.id)).toBe(true);
+    const first = await listMyAppointmentPage(actor, { view: "past", number: 1 });
+    const second = await listMyAppointmentPage(actor, { view: "past", number: 2 });
+    expect(first.entries).toHaveLength(25);
+    expect(first.hasMore).toBe(true);
+    expect(second.entries.some((row) => first.entries.some((other) => other.id === row.id))).toBe(false);
+    await expect(listMyAppointmentPage(actor, { number: -1 })).rejects.toThrow();
+  });
+  it("uses the clinic timezone even when the process default differs", async () => {
+    await owner.query("UPDATE clinics SET timezone='UTC' WHERE id=$1", [seedIds.clinic]);
+    try {
+      expect((await getWaitingRoomBoard(staff(), {})).timeZone).toBe("UTC");
+    } finally {
+      await owner.query("UPDATE clinics SET timezone='Europe/Istanbul' WHERE id=$1", [seedIds.clinic]);
+    }
   });
 });

@@ -14,7 +14,7 @@ const BOARD_MOVES = ["checked_in", "rooming", "ready", "no_show"] as const satis
 export default async function BoardPage({ searchParams }: { searchParams: Promise<{ day?: string }> }) {
   const actor = await requireActor(["staff", "admin"]);
   const { day: requested } = await searchParams;
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor).catch(() => null))?.timezone ?? clinicTimezone();
   const day = /^\d{4}-\d{2}-\d{2}$/.test(requested ?? "") ? requested! : todayInZone(timeZone);
   const breadcrumb = <><span className="breadcrumb-app"><Home /></span><span className="breadcrumb-first">Front desk</span><ChevronRight /><span>Waiting room</span></>;
   const shell = (children: React.ReactNode, clinicName: string) =>
@@ -36,6 +36,7 @@ export default async function BoardPage({ searchParams }: { searchParams: Promis
         {/* This screen faces a room, so it carries times and states and nothing else. */}
         <p className="section-description">Times and states only: no names and no reasons appear here, because this screen can be seen from the waiting area.</p></div></div>
     </div>
+    {actor.role === "admin" ? <p className="section-description">Administrator view: appointment updates are made by front-desk staff or clinicians.</p> : null}
     <Board
       day={board.day}
       timeZone={board.timeZone}

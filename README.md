@@ -6,9 +6,9 @@ A clinic platform built around one complete visit workflow: book, check in, cond
 
 ## What works
 
-The visit thread runs end to end across five screens: patient booking, the clinician's day, the encounter and note, the patient's visit summary, and the administrator's access log. Behind them are real scheduling, clinical and billing services, MFA with care-relationship authorization, and a hash-chained audit log.
+The application has patient booking and appointment history, a clinical queue, charts, encounter notes and prescribing, a staff waiting-room board, billing and administration. It uses four domain modules, a BullMQ worker and an authenticated WebSocket service. See [delivery status](docs/STATUS.md) for current evidence and remaining work.
 
-Not built yet: the patient appointment list, the clinician chart view, prescribing, and the staff waiting-room board.
+The reliability pass adds serialized autosave, atomic signing and visit transitions, transactionally audited billing, mail retry handling, appointment pagination and clinic-specific timezones. Prescribing still requires a validated production safety provider; the synthetic fixture cannot authorize issuance.
 
 ## Run it
 
@@ -21,8 +21,11 @@ Copy-Item .env.example .env.local
 npm run infra:up      # PostgreSQL, Redis and MinIO on loopback ports
 npm run db:migrate
 npm run db:seed
+npm.cmd run storage:init # create the document bucket
 npm.cmd run dev -- --port 4000
 ```
+
+Run `npm.cmd run worker` and `npm.cmd run realtime` in separate terminals when testing notifications and live updates. Both load `.env.local`; `-- --check` validates imports and required configuration without contacting dependencies.
 
 Open **http://127.0.0.1:4000/**. Public pages and `/design` work without a database; everything behind a session needs one.
 
@@ -50,12 +53,18 @@ To watch authorization refuse something, sign in as `clinician2@example.test` an
 npm run typecheck
 npm run lint
 npm test
-npm run test:integration   # needs Docker; real PostgreSQL and Redis
+npm run test:integration   # needs Docker; real PostgreSQL, Redis and MinIO
 npm run build
 npx playwright install chromium
 npm run test:e2e
 npm audit --omit=dev       # the gate CI blocks on
 ```
+
+Development output uses `.next-dev`; production uses `.next`. Browser tests build into `.next-test` and own port 4013, without reusing your development server. The default browser suite covers public/design pages and unauthenticated access; it does not prove the authenticated visit workflow.
+
+Apply migration `0014_observation_provenance` before running the updated application. Existing observations keep unknown encounter provenance. New observations require a matching clinic, patient and encounter. The migration also records actual mutation time after database lock waits.
+
+For per-client authentication limits, configure `AUTH_TRUSTED_IP_HEADER` only behind a proxy that overwrites that header and prevents direct access to the origin. Without this setting the application retains a conservative shared bucket. Background mail jobs fail and retry when delivery is unconfigured or rejected; queue handoff is not proof of provider acceptance.
 
 ## Structure
 
@@ -79,5 +88,5 @@ Runtime services connect as `meridian_app`, which cannot DELETE or TRUNCATE and 
 
 ## More
 
-- [Implementation plan](docs/IMPLEMENTATION_PLAN.md) — milestones, all nine screens, service contracts, acceptance criteria.
+- [Implementation plan](docs/IMPLEMENTATION_PLAN.md) — milestones, improvement progress, service contracts and acceptance criteria.
 - [Verification status](docs/STATUS.md) — what is implemented, what has been checked, and the known limitations.

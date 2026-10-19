@@ -1,7 +1,7 @@
 import "server-only";
 import { findReminderTarget, listReminderWindow } from "@/modules/scheduling";
 import { findPortalContact, recordSystemEvent } from "@/modules/identity";
-import { sendMail } from "@/platform/mailer";
+import { sendJobMail } from "@/platform/mailer";
 import { getJobQueue } from "@/platform/queue";
 
 /** How far ahead of a visit each reminder goes out. */
@@ -43,7 +43,8 @@ export async function sendAppointmentReminder(input: { appointmentId: string; of
   if (hoursAway < 0 || hoursAway > input.offsetHours + 1) return { sent: false, reason: "no longer due" };
   const contact = await findPortalContact(appointment.clinicId, appointment.patientId);
   if (!contact) return { sent: false, reason: "no portal account" };
-  const delivery = await sendMail({ to: contact.email, subject: "A reminder about your appointment",
+  const delivery = await sendJobMail({ to: contact.email, subject: "A reminder about your appointment",
+    idempotencyKey: `reminder-${input.appointmentId}-${input.offsetHours}-${appointment.startsAt.getTime()}`,
     text: `Your appointment is on ${appointment.startsAt.toISOString().slice(0, 16).replace("T", " at ")} UTC.\n\n${appointment.preparation}\n\nSign in to your clinic portal to see the details, move it or cancel it.` });
   // Recorded against the patient as a system event: no person sent this.
   await recordSystemEvent({ clinicId: appointment.clinicId, patientId: appointment.patientId, action: "scheduling.reminder_sent",

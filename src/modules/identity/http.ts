@@ -1,9 +1,10 @@
 import "server-only";
+import { clientAddressFromHeaders } from "./client-address";
 import { cookies, headers } from "next/headers";
 import { resolveSession, SESSION_COOKIE } from "./sessions";
 import { AuthenticationError } from "./errors";
 
-const localOrigins = ["http://127.0.0.1:4000", "http://127.0.0.1:4001", "http://localhost:4000", "http://localhost:4001", "http://127.0.0.1:3000", "http://localhost:3000"];
+const localOrigins = ["http://127.0.0.1:4013", "http://127.0.0.1:4000", "http://127.0.0.1:4001", "http://localhost:4000", "http://localhost:4001", "http://127.0.0.1:3000", "http://localhost:3000"];
 export function allowedAuthOrigins() {
   return process.env.APP_ORIGIN ? [process.env.APP_ORIGIN, ...(process.env.APP_ADDITIONAL_ORIGINS ?? "").split(",").map((value) => value.trim()).filter(Boolean)] : localOrigins;
 }
@@ -27,4 +28,8 @@ export async function assertSameOrigin() {
   const origin = (await headers()).get("origin");
   if (!origin || !allowedAuthOrigins().includes(origin) || (!origin.startsWith("https://") && !localOrigins.includes(origin))) throw new AuthenticationError("This request could not be verified. Reload the page and try again.");
   return origin;
+}
+
+export async function clientAddress() {
+  return clientAddressFromHeaders(await headers(), process.env.AUTH_TRUSTED_IP_HEADER);
 }

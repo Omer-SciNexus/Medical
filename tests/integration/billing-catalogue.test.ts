@@ -9,6 +9,7 @@ import { migrateDatabase } from "../../scripts/migrate";
 import { seedDatabase, seedId, seedIds } from "../../scripts/seed";
 import { encryptSecret } from "../../src/modules/identity/crypto";
 import { addService, changeServiceState, getPriceList, getVisitInvoice, listInvoices, setDefaultService, settleInvoice, voidInvoice } from "../../src/modules/billing/service";
+import { assertCanAccessPatient, AccessDeniedError } from "../../src/modules/identity/service";
 import { BillingError } from "../../src/modules/billing/validators";
 import { addEncounterCharge, finishEncounter, removeEncounterCharge, signNote, startEncounter } from "../../src/modules/clinical/service";
 import { EncounterStateError } from "../../src/modules/clinical/validators";
@@ -28,6 +29,7 @@ const signAndFinish = async (encounterId: string, summary: string) => {
   await owner.query("UPDATE note_versions SET content = $1 WHERE id = $2", ["Subjective: recorded for the billing suite.", note.rows[0].id]);
   const fresh = await owner.query("SELECT revision FROM note_versions WHERE id = $1", [note.rows[0].id]);
   await signNote(clinician(), { encounterId, versionId: note.rows[0].id, revision: fresh.rows[0].revision });
+  await owner.query("UPDATE appointments SET status='in_progress' WHERE id=(SELECT appointment_id FROM encounters WHERE id=$1)", [encounterId]);
   return finishEncounter(clinician(), { encounterId, summary });
 };
 
@@ -156,5 +158,36 @@ describe("settling an invoice", () => {
     const invoice = (await listInvoices(staff()))[0];
     await expect(settleInvoice(clinician(), { chargeId: invoice.id, method: "cash" })).rejects.toBeInstanceOf(BillingError);
     await expect(listInvoices(clinician())).rejects.toBeInstanceOf(BillingError);
+  });
+});
+
+describe("billing authorization and transaction boundaries", () => {
+  async function freshInvoice() {
+    const encounter = await startEncounter(clinician(), { appointmentId: seedId(410) });
+    await addEncounterCharge(clinician(), { encounterId: encounter.id, serviceId: await serviceId("CONSULT"), quantity: 1 });
+    return { ...(await getVisitInvoice(seedIds.clinic, encounter.id))!, encounterId: encounter.id };
+  }
+  it("allows an administrator to settle without granting chart access", async () => {
+    const invoice = await freshInvoice();
+    await expect(assertCanAccessPatient(admin(), seedId(110), "clinical.read")).rejects.toBeInstanceOf(AccessDeniedError);
+    await expect(settleInvoice(admin(), { chargeId: invoice.id, method: "card" })).resolves.toMatchObject({ status: "paid" });
+    await owner.query("UPDATE charges SET status='pending', paid_at=NULL, paid_method=NULL WHERE id=$1", [invoice.id]);
+  });
+  it("rolls back payment, void and line removal when their audit insert fails", async () => {
+    const invoice = await freshInvoice();
+    await owner.query(`CREATE FUNCTION reject_billing_audit_for_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.action IN ('billing.charge_paid','billing.charge_voided','billing.charge_line_removed') THEN RAISE EXCEPTION 'simulated audit failure'; END IF;
+      RETURN NEW; END $$`);
+    await owner.query("CREATE TRIGGER reject_billing_test BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION reject_billing_audit_for_test()");
+    try {
+      await expect(settleInvoice(admin(), { chargeId: invoice.id, method: "card" })).rejects.toThrow();
+      await expect(voidInvoice(admin(), { chargeId: invoice.id, reason: "Testing transaction rollback" })).rejects.toThrow();
+      await expect(removeEncounterCharge(clinician(), { encounterId: invoice.encounterId, lineId: invoice.lines[0].id })).rejects.toThrow();
+      expect((await owner.query("SELECT status FROM charges WHERE id=$1", [invoice.id])).rows[0].status).toBe("pending");
+      expect((await owner.query("SELECT deleted_at FROM charge_lines WHERE id=$1", [invoice.lines[0].id])).rows[0].deleted_at).toBeNull();
+    } finally {
+      await owner.query("DROP TRIGGER reject_billing_test ON audit_log");
+      await owner.query("DROP FUNCTION reject_billing_audit_for_test()");
+    }
   });
 });
