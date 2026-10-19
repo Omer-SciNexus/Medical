@@ -25,12 +25,12 @@ export async function enqueueOutbox(tx: Transaction, event: { clinicId: string; 
 }
 
 // Read side of the outbox, kept clear of the queue so an operator screen needs no broker.
-export async function outboxBacklog() {
+export async function outboxBacklog(clinicId?: string) {
   const [row] = await getDb().select({
     pending: sql<number>`count(*) FILTER (WHERE ${outbox.dispatchedAt} IS NULL AND ${outbox.failedAt} IS NULL)::int`,
     dead: sql<number>`count(*) FILTER (WHERE ${outbox.failedAt} IS NOT NULL)::int`,
     dispatched: sql<number>`count(*) FILTER (WHERE ${outbox.dispatchedAt} IS NOT NULL)::int`,
-  }).from(outbox);
+  }).from(outbox).where(clinicId ? eq(outbox.clinicId, clinicId) : undefined);
   return { pending: row?.pending ?? 0, dead: row?.dead ?? 0, dispatched: row?.dispatched ?? 0 };
 }
 export async function listOutboxRows(clinicId: string, scope: "pending" | "dead" | "dispatched") {

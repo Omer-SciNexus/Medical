@@ -12,7 +12,7 @@ type Service = { id: string; code: string; name: string; amountMinor: number; cu
 type Invoice = { id: string; encounterId: string; patientId: string; amountMinor: number; currency: string; status: string; createdAt: string; paidAt: string | null };
 const METHODS = ["cash", "card", "transfer", "insurance"];
 
-export function Services({ services, invoices, currency, timeZone }: { services: Service[]; invoices: Invoice[]; currency: string; timeZone: string }) {
+export function Services({ services, invoices, currency, timeZone, canManagePrices = true }: { services: Service[]; invoices: Invoice[]; currency: string; timeZone: string; canManagePrices?: boolean }) {
   const [addState, addService, addPending] = useActionState(addServiceAction, idleAction);
   const [stateState, setState, statePending] = useActionState(setServiceStateAction, idleAction);
   const [defaultState, setDefault, defaultPending] = useActionState(setDefaultServiceAction, idleAction);
@@ -25,6 +25,7 @@ export function Services({ services, invoices, currency, timeZone }: { services:
 
   return <>
     {error ? <p className="field-error" role="alert" style={{ marginBottom: 14 }}>{error}</p> : null}
+    {canManagePrices ? <>
     <form action={addService} className="admin-form schedule-form" aria-busy={addPending}>
       <Field label="Code" id="code" error={addState.errors?.code?.[0]} hint="Capitals, digits and hyphens.">
         <Input id="code" name="code" defaultValue={addState.values?.code} placeholder="CONSULT-LONG" maxLength={20} required className="mono" /></Field>
@@ -66,6 +67,7 @@ export function Services({ services, invoices, currency, timeZone }: { services:
       <div className="queue-footer"><span>One default per clinic, which a partial unique index enforces. A withdrawn service stays on invoices that already used it.</span></div>
     </div>
 
+    </> : null}
     <div className="specimen">
       <div className="specimen-topline"><strong>Invoices</strong><span>{invoices.filter((invoice) => invoice.status === "pending").length} unpaid</span></div>
       {!invoices.length ? <div className="state-panel" style={{ textAlign: "center", minHeight: 0, padding: "32px 24px" }}>

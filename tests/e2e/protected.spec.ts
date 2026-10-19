@@ -15,7 +15,7 @@ test.describe("protected clinical routes", () => {
     });
   }
   test("sends a visitor with a malformed session cookie to sign-in", async ({ page, context }) => {
-    await context.addCookies([{ name: "meridian_session", value: "not-a-valid-session-token", url: "http://127.0.0.1:4000" }]);
+    await context.addCookies([{ name: "meridian_session", value: "not-a-valid-session-token", url: "http://127.0.0.1:4013" }]);
     await page.goto("/clinical/today");
     await expect(page).toHaveURL(/\/sign-in$/);
   });

@@ -1,3 +1,51 @@
+# Reliability implementation ? 19 October 2026
+
+Local branch: `fix/clinic-workflow-reliability`. Changes have not been pushed or deployed. This section supersedes the older verification snapshot below.
+
+## CI storage dependency correction
+
+Both supplied GitHub Actions logs report 206 passing tests and one failed suite: the object-store setup cannot pull `minio/minio:RELEASE.2025-04-22T22-12-26Z`. Its two tests never execute. This is an unavailable external test image, not a Git merge conflict or an application assertion failure. The expected audit-tampering, queue retry and mail-503 messages belong to passing failure-path tests; the PostgreSQL query deprecation warning is separate.
+
+Compose and Testcontainers now share `docker/minio/Dockerfile`, which builds the same MinIO release from official commit `0d7408fc9969caf07de6a8c3a84f9fbb10a6739e` and verifies the source archive SHA-256. This follows the upstream source-only distribution model (https://github.com/minio/minio#source-only-distribution). No GitHub permissions change or registry login is required by this approach. Storage assertions remain enabled; only that suite's setup timeout increases to allow a cold source build, with the CI job budget extended to 30 minutes. Individual test assertion timeouts remain unchanged.
+
+Validation: TypeScript, lint, Compose configuration and whitespace checks passed. The standard local Testcontainers run stalled while listing existing containers, before the image build, and was stopped. A separate direct Docker build successfully pulled its base images and verified the pinned source checksum, but was stopped after dependency downloads ceased making visible progress. The two storage assertions have not yet run against the replacement image. A new GitHub Actions run is required. This correction has not been committed or pushed.
+
+## Implemented in this pass
+
+- Development, production and browser-test builds use separate output directories. Browser tests own port 4013. Worker/realtime commands load local configuration under the React server condition, validate required settings and close runtime connections on shutdown.
+- The note editor serializes autosaves, retains later edits while a request is pending, preserves failed/conflicting text and flushes before review. The signature commits the reviewed text and signature together. Navigation and reload warn when text is unsaved.
+- Starting a visit through the action updates its appointment and creates the encounter/note in one transaction. Stale starts roll back. Completion now refuses a mismatched appointment state and rolls back its charge, summary and outbox events.
+- Invoice payment, voiding and line removal share their audit transaction. Staff/admin billing authority is validated independently of chart access. Staff can reach invoices; price-list administration remains admin-only. Billing load errors are visible.
+- Mail jobs throw on missing configuration or provider failure and reuse delivery idempotency keys. Queue errors store fixed operational codes. Outbox counts are clinic-scoped and the screen distinguishes queue handoff from delivery. Live subscriptions refresh after reconnect.
+- Observation rows retain encounter provenance, protected by a composite foreign key. Assisted drafts include only observations from that encounter; legacy unlinked observations are not presented as current-visit measurements. The editor explains the external AI data transfer and the provider call has a bounded timeout.
+- Prescription issuance rejects checks older than 15 minutes, replaced checks, and checks preceding an allergy/prescription change. Application clinical writes serialize by patient. Database mutation timestamps use the time after lock waits.
+- Upload URLs sign a create-only condition, preventing replacement through a reused upload URL. Bucket initialization is explicit; successful uploads refresh the chart. Real object-store regression coverage has been added but is not yet verified here.
+- Appointment lists have separate upcoming/history pages of 25 rows. Scheduling and displays use the stored clinic timezone. Authentication can use an explicitly trusted proxy address header; absent/invalid/untrusted headers use the existing shared fallback. The administrator waiting-room view is labelled as read-only.
+
+## Verification on this workstation
+
+- Production build: passed.
+- Unit tests: 100 passed. Includes delayed autosave/error/conflict cases, real Node process import/configuration checks, mail failures and trusted-header handling.
+- Final type check, lint and whitespace checks: passed.
+- Focused database checks: 73 tests across visit thread, chart entry, prescribing, billing, patient appointments and outbox pass across the corrected runs. These use fresh local PostgreSQL 17 databases with the repository Redis mock; this is **not** a full Testcontainers pass.
+- A separate queue retry regression passed against the real local Redis broker, using a unique disposable BullMQ queue and mocked mail HTTP responses. A 503 is retried using the same idempotency key, and the job completes only after a 200 response. No message was sent.
+- Final isolated browser run: all 30 public/design/anonymous checks passed, including automated accessibility checks.
+- Docker initially ran the visit suite, then became unresponsive. Subsequent container startup timed out and the run was stopped. Real MinIO upload/CORS/overwrite tests and the full PostgreSQL/Redis/MinIO suite remain unverified.
+
+Migration 0014 was exercised only in disposable test databases. The application's development database and any hosted database were not migrated.
+
+## Remaining implementation and release work
+
+1. Restore the Docker test runtime and pass the complete integration suite, particularly MinIO conditional uploads and browser CORS.
+2. Add durable downstream delivery status and operator retry for exhausted BullMQ jobs; outbox dispatch status alone is insufficient. Verify the selected provider's idempotency retention and delivery callbacks.
+3. Complete document content validation/scanning and cleanup of abandoned uploads. Validate production object-store policy, CORS, encryption and retention.
+4. Add authenticated browser coverage for patient booking/rescheduling, staff check-in, clinical note conflict/signing, billing, and denied cross-clinic access. Current browser evidence is limited to public/design/anonymous routes.
+5. Validate the prescribing provider and complete active-medication/context coverage across encounters. The new freshness guard is an application boundary, not clinical validation or prescription transmission.
+6. Measure performance and accessibility with the full authenticated workflow and realistic synthetic volumes. No production latency or field accessibility claim is made here.
+7. Rehearse forward migration, backup restore and recovery in staging; configure hosting, HTTPS, secrets, monitoring and approved providers. Deployment, live delivery, physical workflow review and restore verification remain pending.
+
+---
+
 # Delivery status — 16 October 2026
 
 Meridian is a demonstration clinic platform. Nothing here concerns certification, national-system

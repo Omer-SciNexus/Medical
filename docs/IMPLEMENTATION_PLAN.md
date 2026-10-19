@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-A medium-sized clinic application with four domain modules and nine screens. Finish one thread: book an appointment, check in, conduct the encounter, sign a note, issue a prescription, generate a charge, publish the patient summary. One Next.js web application, one BullMQ worker, and a small authenticated WebSocket service. No microservices or additional product modules.
+A medium-sized clinic application with four domain modules. The original nine-screen brief has grown to the routes listed in STATUS.md. Finish one thread: book an appointment, check in, conduct the encounter, sign a note, issue a prescription, generate a charge, publish the patient summary. One Next.js web application, one BullMQ worker, and a small authenticated WebSocket service. No microservices or additional product modules.
 
 English is the initial interface language; Europe/Istanbul is the development clinic timezone. Currency, jurisdiction, drug data provider, prescription transmission provider, notification provider, hosting/data residency, and production retention policy remain deployment decisions. Store timestamps in UTC and render in the clinic's IANA timezone. Include clinic ownership now so records cannot bleed across practices. Do not imply regulatory certification.
 
@@ -100,3 +100,21 @@ Release requires production build, lint/type checks, integration/E2E pass, WCAG 
 - https://nextjs.org/blog — security releases; resolve and lock the newest available patched Next.js 15.
 - https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html — session controls.
 - https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html — MFA lifecycle.
+
+
+## Improvement execution order ? 19 October 2026
+
+The current implementation and exact verification limits are recorded in [STATUS.md](STATUS.md).
+
+| Step | Local progress | Next acceptance gate |
+| --- | --- | --- |
+| 1. Repeatable environment and runtime | Separate build outputs; executable worker/realtime startup checks; explicit storage initialization | Complete container-backed suite, including storage |
+| 2. Note and visit integrity | Serialized autosave, reviewed-text signing, atomic start and guarded completion | Authenticated browser conflict and recovery checks |
+| 3. Billing authority and audit | Financial-role validation, transaction rollback, staff invoice access | Full access matrix in the standard integration runtime |
+| 4. Background reliability | Mail failures retry with stable keys; clinic-scoped handoff reporting; reconnect refresh | Durable delivery outcomes, exhausted-job retry UI and provider verification |
+| 5. Clinical context | Visit-linked observations, AI disclosure/timeout, prescription freshness checks | Validated provider and complete medication/context coverage |
+| 6. Documents and usability | Conditional uploads, appointment paging, clinic timezone, trusted-proxy rate-limit configuration | MinIO verification, content scanning/cleanup, browser workflow review |
+| 7. Verification and performance | Regression coverage, local PostgreSQL checks, real Redis retry test, production build | Authenticated E2E, full integration suite, load and accessibility evidence |
+| 8. Release operations | Local setup/status documentation updated | Staging migration, backup restore, monitoring, provider and deployment validation |
+
+Do not treat a dispatched outbox event as a delivered message, local import checks as running infrastructure, or public-page browser checks as proof of the authenticated workflow. Keep each gate's command, environment, result and limitation in STATUS.md.

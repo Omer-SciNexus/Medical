@@ -256,3 +256,37 @@ describe("audit chain", () => {
     expect(alerted.rows[0].reason).toBe(`broken:${seq}`);
   });
 });
+
+describe("signing the reviewed content", () => {
+  it("freezes the supplied text atomically and rejects an earlier revision", async () => {
+    const encounter = await startEncounter(clinician(), { appointmentId: seedId(402) });
+    const note = (await owner.query("SELECT id, revision FROM note_versions WHERE encounter_id=$1 ORDER BY version DESC LIMIT 1", [encounter.id])).rows[0];
+    const reviewed = "Subjective: The clinician reviewed this exact version before signing.";
+    await signNote(clinician(), { encounterId: encounter.id, versionId: note.id, revision: note.revision, content: reviewed });
+    expect((await owner.query("SELECT content,status FROM note_versions WHERE id=$1", [note.id])).rows[0]).toMatchObject({ content: reviewed, status: "signed" });
+    await expect(saveNote(clinician(), { encounterId: encounter.id, versionId: note.id, revision: note.revision, content: "A delayed autosave must not replace the signature." })).rejects.toBeInstanceOf(NoteConflictError);
+  });
+});
+
+describe("atomic visit start", () => {
+  it("rejects stale starts without leaving a new encounter and makes retries idempotent", async () => {
+    const appointmentId = seedId(410);
+    await owner.query("UPDATE appointments SET status='ready', revision=7 WHERE id=$1", [appointmentId]);
+    await expect(startEncounter(clinician(), { appointmentId, revision: 6 })).rejects.toThrow();
+    expect((await owner.query("SELECT count(*)::int AS count FROM encounters WHERE appointment_id=$1", [appointmentId])).rows[0].count).toBe(0);
+    const first = await startEncounter(clinician(), { appointmentId, revision: 7 });
+    expect((await owner.query("SELECT status,revision FROM appointments WHERE id=$1", [appointmentId])).rows[0]).toEqual({ status: "in_progress", revision: 8 });
+    expect((await startEncounter(clinician(), { appointmentId, revision: 7 })).id).toBe(first.id);
+  });
+});
+
+describe("completion consistency", () => {
+  it("rolls back billing and publication if the appointment cannot be closed", async () => {
+    const encounter = await startEncounter(clinician(), { appointmentId: seedId(404) });
+    const note = (await owner.query("SELECT id,revision FROM note_versions WHERE encounter_id=$1", [encounter.id])).rows[0];
+    await signNote(clinician(), { encounterId: encounter.id, versionId: note.id, revision: note.revision, content: "Reviewed visit note for the completion rollback regression." });
+    await expect(finishEncounter(clinician(), { encounterId: encounter.id, summary: "This summary must not publish while the appointment is still checked in." })).rejects.toThrow();
+    expect((await owner.query("SELECT status,published_at FROM encounters WHERE id=$1", [encounter.id])).rows[0]).toEqual({ status: "in_progress", published_at: null });
+    expect((await owner.query("SELECT count(*)::int AS count FROM charges WHERE encounter_id=$1", [encounter.id])).rows[0].count).toBe(0);
+  });
+});

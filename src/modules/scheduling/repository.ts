@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, gt, gte, isNull, lt, ne, notExists, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, isNull, lt, ne, notExists, sql } from "drizzle-orm";
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, grantWorkflowAccess, type Actor } from "@/modules/identity";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
@@ -72,13 +72,14 @@ export async function moveAppointmentToSlot(actor: Actor, input: { appointmentId
     throw error;
   }
 }
-export async function listPatientAppointments(actor: Actor, patientId: string) {
+export async function listPatientAppointments(actor: Actor, patientId: string, page?: { view: "upcoming" | "past"; number: number; at: Date }) {
+  const upcoming = sql`${availabilitySlots.startsAt} > ${page?.at.toISOString() ?? new Date().toISOString()}::timestamptz AND ${appointments.status} NOT IN ('cancelled', 'done', 'no_show')`;
   return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.appointments_read", () =>
     tx.select({ id: appointments.id, reason: appointments.reason, preparation: appointments.preparation, status: appointments.status, revision: appointments.revision,
       startsAt: availabilitySlots.startsAt, endsAt: availabilitySlots.endsAt, providerId: availabilitySlots.providerId })
       .from(appointments).innerJoin(availabilitySlots, and(eq(appointments.slotId, availabilitySlots.id), eq(appointments.clinicId, availabilitySlots.clinicId)))
-      .where(and(eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, patientId), isNull(appointments.deletedAt)))
-      .orderBy(asc(availabilitySlots.startsAt)).limit(100)));
+      .where(and(eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, patientId), isNull(appointments.deletedAt), page ? (page.view === "upcoming" ? upcoming : sql`NOT (${upcoming})`) : undefined))
+      .orderBy(page?.view === "past" ? desc(availabilitySlots.startsAt) : asc(availabilitySlots.startsAt), asc(appointments.id)).limit(page ? 26 : 100).offset(page ? (page.number - 1) * 25 : 0)));
 }
 // Scoped to the actor's own session slots. Opening a chart still needs patient authorization.
 export async function listProviderQueue(clinicId: string, providerId: string, from: Date, to: Date) {
@@ -213,12 +214,24 @@ export async function transitionAppointment(actor: Actor, input: { appointmentId
     return updated;
   }));
 }
-// Server-driven close-out inside the clinical completion transaction, so a completed visit
-// and a finished appointment commit together. Idempotent when already marked done.
+// The appointment joins the encounter-opening transaction.
+export async function beginAppointment(tx: Transaction, actor: Actor, input: { appointmentId: string; patientId: string; revision: number }) {
+  const [appointment] = await tx.select({ status: appointments.status, revision: appointments.revision }).from(appointments)
+    .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId), isNull(appointments.deletedAt)))
+    .for("update").limit(1);
+  // A repeated start joins the already-open visit without advancing its revision again.
+  if (appointment?.status === "in_progress") return;
+  if (!appointment || appointment.status !== "ready" || appointment.revision !== input.revision) throw new StaleAppointmentError();
+  await tx.update(appointments).set({ status: "in_progress", revision: input.revision + 1, updatedBy: actor.id })
+    .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId)));
+}
+// Server-driven close-out: a stale appointment rolls back the full visit transaction.
 export async function completeAppointment(tx: Transaction, actor: Actor, input: { appointmentId: string; patientId: string }) {
-  await tx.update(appointments).set({ status: "done", revision: sql`${appointments.revision} + 1`, updatedBy: actor.id })
+  const [completed] = await tx.update(appointments).set({ status: "done", revision: sql`${appointments.revision} + 1`, updatedBy: actor.id })
     .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId),
-      eq(appointments.status, "in_progress"), isNull(appointments.deletedAt)));
+      eq(appointments.status, "in_progress"), isNull(appointments.deletedAt)))
+    .returning({ id: appointments.id });
+  if (!completed) throw new StaleAppointmentError();
 }
 export async function insertPatient(actor: Actor, input: { givenName: string; surname: string; birthDate: string; sex: string; mrn: string }) {
   const [patient] = await getDb().insert(patients).values({ ...input, clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id })

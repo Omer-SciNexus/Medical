@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { assertSameOrigin, requestBreakGlass } from "@/modules/identity";
-import { advanceAppointment, getAppointmentForCare } from "@/modules/scheduling";
+import { advanceAppointment } from "@/modules/scheduling";
 import { addEncounterCharge, addProblem, amendNote, AssistUnavailableError, confirmDocumentUpload, cancelPrescription, changeProblemStatus, checkPrescription, draftNoteText, draftPrescription, findMedications, finishEncounter, getPatientChart, issuePrescription, recordAllergy, recordVitals, removeEncounterCharge, requestDocumentDownload, requestDocumentUpload, saveNote, signNote, startEncounter } from "@/modules/clinical";
 import { publishChange } from "@/platform/realtime";
 import { requireActor } from "@/app/session";
@@ -28,16 +28,10 @@ export async function startVisitAction(_previous: ActionState, form: FormData): 
   try {
     await assertSameOrigin();
     const actor = await requireActor(["clinician"]);
-    const encounter = await startEncounter(actor, { appointmentId: String(form.get("appointmentId") ?? "") });
-    // openEncounter is idempotent, so a resubmission that lands after the appointment already
-    // advanced is harmless. Any other failure (a genuinely stale revision, a concurrent change)
-    // must not be swallowed: that is what used to leave the appointment stuck on "ready" while
-    // the visit went on to bill.
-    await advanceAppointment(actor, { appointmentId: encounter.appointmentId, revision: Number(form.get("revision") ?? 0), status: "in_progress" }).catch(async (error) => {
-      const current = await getAppointmentForCare(actor, encounter.appointmentId);
-      if (current.status !== "in_progress") throw error;
-    });
+    const encounter = await startEncounter(actor, { appointmentId: String(form.get("appointmentId") ?? ""), revision: Number(form.get("revision") ?? 0) });
     encounterId = encounter.id;
+    await publishChange(actor.clinicId, "clinic:queue");
+    await publishChange(actor.clinicId, "clinic:board");
   } catch (error) { return toActionState(error); }
   redirect(`/clinical/encounters/${encounterId}`);
 }
@@ -66,12 +60,9 @@ export async function signNoteAction(_previous: ActionState, form: FormData): Pr
   try {
     await assertSameOrigin();
     const actor = await requireActor(["clinician"]);
-    // Save the visible text first so signing can never freeze a version the clinician has not seen.
-    const content = String(form.get("content") ?? "");
-    let revision = Number(form.get("revision") ?? 0);
-    const versionId = String(form.get("versionId") ?? "");
-    if (form.get("dirty") === "true") revision = (await saveNote(actor, { encounterId, versionId, revision, content })).revision;
-    await signNote(actor, { encounterId, versionId, revision });
+    // The reviewed text and signature commit together. Never trust a browser's "dirty" flag.
+    await signNote(actor, { encounterId, versionId: String(form.get("versionId") ?? ""),
+      revision: Number(form.get("revision") ?? 0), content: String(form.get("content") ?? "") });
   } catch (error) { return toActionState(error); }
   revalidatePath(`/clinical/encounters/${encounterId}`);
   return { ok: true };

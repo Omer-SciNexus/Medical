@@ -20,7 +20,7 @@ export default async function EncounterPage({ params }: { params: Promise<{ uuid
   const actor = await requireActor(["clinician"]);
   const { uuid } = await params;
   if (!uuidPattern.test(uuid)) notFound();
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor).catch(() => null))?.timezone ?? clinicTimezone();
   const [clinic, workspace] = await Promise.all([getClinicSettings(actor), getEncounterWorkspace(actor, uuid).catch(() => null)]);
   const breadcrumb = <><span className="breadcrumb-app"><Home /></span><Link className="breadcrumb-first" href="/clinical/today">Today</Link><ChevronRight /><span>Encounter</span></>;
   if (!workspace) return <AppShell actor={actor} clinicName={clinic?.name ?? "Your clinic"} current="/clinical/today" breadcrumb={breadcrumb}>
@@ -46,7 +46,7 @@ export default async function EncounterPage({ params }: { params: Promise<{ uuid
           <AlertTriangle /><span><strong>Allergies</strong>{chart.allergies.map((allergy) => `${allergy.substance} — ${allergy.reaction} (${allergy.severity})`).join(" · ")}</span>
         </div> : <p className="context-normal"><CheckCircle2 /> No known allergies recorded</p>}
 
-        <NoteEditor
+        <NoteEditor key={`${note.id}:${note.status}`}
           note={{ ...note, signedAt: note.signedAt ? note.signedAt.toISOString() : null }}
           encounter={{ id: encounter.id, status: encounter.status, summary: encounter.summary, publishedAt: encounter.publishedAt ? encounter.publishedAt.toISOString() : null }}
           charge={charge ? { amountMinor: charge.amountMinor, currency: charge.currency } : null}

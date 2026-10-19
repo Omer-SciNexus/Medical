@@ -44,7 +44,7 @@ function buildPrompt(input: DraftInput) {
 export async function draftVisitNote(input: DraftInput) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new AssistUnavailableError("Drafting assistance is not configured for this deployment.");
-  const client = new Anthropic({ apiKey });
+  const client = new Anthropic({ apiKey, timeout: 30_000, maxRetries: 1 });
   try {
     const response = await client.beta.messages.create({
       model: "claude-opus-5",

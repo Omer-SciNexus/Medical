@@ -15,7 +15,7 @@ const outcomeTone = (outcome: string) => outcome === "denied" ? "critical" : out
 export default async function AuditPage({ searchParams }: { searchParams: Promise<Filters> }) {
   const actor = await requireActor(["admin"]);
   const filters = await searchParams;
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor).catch(() => null))?.timezone ?? clinicTimezone();
   const clinic = await getClinicSettings(actor).catch(() => null);
   const breadcrumb = <><span className="breadcrumb-app"><Home /></span><span className="breadcrumb-first">Administration</span><ChevronRight /><span>Access log</span></>;
   const shell = (children: React.ReactNode) =>

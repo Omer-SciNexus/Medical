@@ -20,7 +20,7 @@ const boundaries = {
   },
 };
 const config = [
-  { ignores: [".next/**", "node_modules/**", ".npm-cache/**", ".artifacts/**", "test-results/**", "playwright-report/**", "next-env.d.ts", "drizzle/**"] },
+  { ignores: [".next/**", ".next-dev/**", ".next-test/**", ".harness/**", "vitest.harness.config.ts", "node_modules/**", ".npm-cache/**", ".artifacts/**", "test-results/**", "playwright-report/**", "next-env.d.ts", "drizzle/**"] },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   { files: ["src/**/*.{ts,tsx}"], plugins: { meridian: { rules: { "domain-boundaries": boundaries } } }, rules: { "meridian/domain-boundaries": "error" } },
 ];
