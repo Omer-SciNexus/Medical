@@ -16,7 +16,7 @@ export default async function OutboxPage({ searchParams }: { searchParams: Promi
   const scope = scopes.find((candidate) => candidate === requested) ?? "pending";
   const breadcrumb = <><span className="breadcrumb-app"><Home /></span><span className="breadcrumb-first">Administration</span><ChevronRight /><span>Event delivery</span></>;
   const [clinic, backlog, rows] = await Promise.all([
-    getClinicSettings(actor).catch(() => null), outboxBacklog().catch(() => null), listOutboxRows(actor.clinicId, scope).catch(() => null),
+    getClinicSettings(actor).catch(() => null), outboxBacklog(actor.clinicId).catch(() => null), listOutboxRows(actor.clinicId, scope).catch(() => null),
   ]);
   const shell = (children: React.ReactNode) =>
     <AppShell actor={actor} clinicName={clinic?.name ?? "Your clinic"} current="/admin/outbox" breadcrumb={breadcrumb}>{children}</AppShell>;
@@ -38,7 +38,7 @@ export default async function OutboxPage({ searchParams }: { searchParams: Promi
     <Outbox
       scope={scope}
       backlog={backlog}
-      timeZone={clinicTimezone()}
+      timeZone={clinic?.timezone ?? clinicTimezone()}
       rows={rows.map((row) => ({ id: row.id, topic: row.topic, resourceId: row.resourceId, attempts: row.attempts, lastError: row.lastError,
         createdAt: row.createdAt.toISOString(), dispatchedAt: row.dispatchedAt?.toISOString() ?? null,
         nextAttemptAt: row.nextAttemptAt?.toISOString() ?? null, failedAt: row.failedAt?.toISOString() ?? null }))}

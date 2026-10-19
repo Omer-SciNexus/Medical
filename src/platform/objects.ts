@@ -27,18 +27,22 @@ function settings() {
 const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 const hmac = (key: Buffer | string, value: string) => createHmac("sha256", key).update(value, "utf8").digest();
 // Every path segment is escaped, since a key may contain characters a URL would otherwise read.
-const encodeKey = (key: string) => key.split("/").map(encodeURIComponent).join("/");
+const encodeKey = (key: string) => key.split("/").map((part) => encodeURIComponent(part).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)).join("/");
 
 function signingKey(secretKey: string, date: string, region: string) {
   return hmac(hmac(hmac(hmac(`AWS4${secretKey}`, date), region), SERVICE), "aws4_request");
 }
-function presign(method: "GET" | "PUT" | "HEAD", key: string, options: { expiresInSeconds: number; contentType?: string }) {
+function presign(method: "GET" | "PUT" | "HEAD", key: string, options: { expiresInSeconds: number; contentType?: string; createOnly?: boolean }) {
   const { endpoint, accessKey, secretKey, bucket, region } = settings();
   const now = new Date();
   const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
   const date = stamp.slice(0, 8);
   const scope = `${date}/${region}/${SERVICE}/aws4_request`;
-  const signedHeaders = options.contentType ? "content-type;host" : "host";
+  const headers: Record<string, string> = { host: endpoint.host,
+    ...(options.contentType ? { "content-type": options.contentType } : {}),
+    ...(options.createOnly ? { "if-none-match": "*" } : {}) };
+  const names = Object.keys(headers).sort();
+  const signedHeaders = names.join(";");
   const query = new URLSearchParams({
     "X-Amz-Algorithm": ALGORITHM,
     "X-Amz-Credential": `${accessKey}/${scope}`,
@@ -49,9 +53,8 @@ function presign(method: "GET" | "PUT" | "HEAD", key: string, options: { expires
   // Query parameters are signed in sorted order, which URLSearchParams does not do for us.
   const canonicalQuery = [...query.entries()].sort(([a], [b]) => a < b ? -1 : 1)
     .map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`).join("&");
-  const host = endpoint.host;
-  const canonicalHeaders = options.contentType ? `content-type:${options.contentType}\nhost:${host}\n` : `host:${host}\n`;
-  const canonicalPath = `/${bucket}/${encodeKey(key)}`;
+  const canonicalHeaders = names.map((name) => `${name}:${headers[name]}\n`).join("");
+  const canonicalPath = `/${bucket}${key ? `/${encodeKey(key)}` : ""}`;
   const canonicalRequest = [method, canonicalPath, canonicalQuery, canonicalHeaders, signedHeaders, UNSIGNED].join("\n");
   const toSign = [ALGORITHM, stamp, scope, sha256(canonicalRequest)].join("\n");
   const signature = createHmac("sha256", signingKey(secretKey, date, region)).update(toSign, "utf8").digest("hex");
@@ -59,7 +62,7 @@ function presign(method: "GET" | "PUT" | "HEAD", key: string, options: { expires
 }
 
 export function presignUpload(key: string, contentType: string, expiresInSeconds = 300) {
-  return presign("PUT", key, { expiresInSeconds, contentType });
+  return presign("PUT", key, { expiresInSeconds, contentType, createOnly: true });
 }
 export function presignDownload(key: string, expiresInSeconds = 120) {
   return presign("GET", key, { expiresInSeconds });
@@ -76,12 +79,12 @@ export async function headObject(key: string) {
 }
 /** Creates the bucket if it is missing, so a fresh environment needs no manual setup. */
 export async function ensureBucket() {
-  const { bucket } = settings();
   const probe = presign("HEAD", "", { expiresInSeconds: 60 });
-  const exists = await fetch(probe.url.replace(`/${bucket}/?`, `/${bucket}?`), { method: "HEAD", signal: AbortSignal.timeout(5_000) }).catch(() => undefined);
+  const exists = await fetch(probe.url, { method: "HEAD", signal: AbortSignal.timeout(5_000) }).catch(() => undefined);
   if (exists?.ok) return { created: false };
   const create = presign("PUT", "", { expiresInSeconds: 60 });
-  const response = await fetch(create.url.replace(`/${bucket}/?`, `/${bucket}?`), { method: "PUT", signal: AbortSignal.timeout(5_000) });
-  return { created: response.ok };
+  const response = await fetch(create.url, { method: "PUT", signal: AbortSignal.timeout(5_000) });
+  if (!response.ok) throw new Error("Document bucket could not be created. Check storage configuration.");
+  return { created: true };
 }
 export { settings as objectStoreSettings };

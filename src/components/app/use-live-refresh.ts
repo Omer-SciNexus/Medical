@@ -28,7 +28,7 @@ export function useLiveRefresh(channel: "clinic:board" | "clinic:queue", fallbac
       socket.addEventListener("open", () => { attempt = 0; socket?.send(JSON.stringify({ type: "subscribe", channel })); });
       socket.addEventListener("message", (event) => {
         const message = JSON.parse(String(event.data)) as { type?: string };
-        if (message.type === "subscribed") setLive(true);
+        if (message.type === "subscribed") { setLive(true); router.refresh(); }
         // No cursor and no payload: the refresh is what reads the current, authorized state.
         if (message.type === "changed") router.refresh();
       });

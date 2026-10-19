@@ -16,7 +16,7 @@ export const metadata: Metadata = { title: "Book a visit", robots: { index: fals
 export default async function BookPage({ searchParams }: { searchParams: Promise<{ providerId?: string; confirmed?: string }> }) {
   const actor = await requireActor(["patient"]);
   const { providerId, confirmed } = await searchParams;
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor).catch(() => null))?.timezone ?? clinicTimezone();
   const breadcrumb = <><span className="breadcrumb-app"><Home /></span><span className="breadcrumb-first">Your care</span><ChevronRight /><span>Book a visit</span></>;
   const shell = (children: React.ReactNode, clinicName: string) =>
     <AppShell actor={actor} clinicName={clinicName} current="/patient/book" breadcrumb={breadcrumb} register="patient">{children}</AppShell>;

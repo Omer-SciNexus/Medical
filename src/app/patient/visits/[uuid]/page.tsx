@@ -16,7 +16,7 @@ export default async function VisitPage({ params }: { params: Promise<{ uuid: st
   const actor = await requireActor(["patient", "clinician"]);
   const { uuid } = await params;
   if (!uuidPattern.test(uuid)) notFound();
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor).catch(() => null))?.timezone ?? clinicTimezone();
   const [clinic, visit] = await Promise.all([getClinicSettings(actor), getVisitSummary(actor, uuid).catch(() => null)]);
   const breadcrumb = <><span className="breadcrumb-app"><Home /></span><Link className="breadcrumb-first" href="/patient/book">Your care</Link><ChevronRight /><span>Visit summary</span></>;
   const shell = (children: React.ReactNode) =>

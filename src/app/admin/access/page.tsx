@@ -33,7 +33,7 @@ export default async function AccessPage() {
         <p>Administration grants no chart access, so this screen shows who holds access to which record without resolving a name. Withdrawing access takes effect on the next request and is itself recorded.</p></div>
     </div>
     <Access
-      timeZone={clinicTimezone()}
+      timeZone={clinic?.timezone ?? clinicTimezone()}
       grants={grants.map((grant) => ({ id: grant.id, patientId: grant.patientId, purpose: grant.purpose, emergency: grant.emergency, reason: grant.reason,
         actorName: grant.actorName, actorRole: grant.actorRole, createdAt: grant.createdAt.toISOString(), expiresAt: grant.expiresAt?.toISOString() ?? null }))}
     />

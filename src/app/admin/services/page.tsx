@@ -10,15 +10,15 @@ import { Services } from "./services";
 export const metadata: Metadata = { title: "Price list", robots: { index: false, follow: false } };
 
 export default async function ServicesPage() {
-  const actor = await requireActor(["admin"]);
+  const actor = await requireActor(["admin", "staff"]);
   const breadcrumb = <><span className="breadcrumb-app"><Home /></span><span className="breadcrumb-first">Administration</span><ChevronRight /><span>Price list</span></>;
   const [clinic, priceList, invoices] = await Promise.all([
-    getClinicSettings(actor).catch(() => null), getPriceList(actor, true).catch(() => null), listInvoices(actor).catch(() => []),
+    getClinicSettings(actor).catch(() => null), getPriceList(actor, true).catch(() => null), listInvoices(actor).catch(() => null),
   ]);
   const shell = (children: React.ReactNode) =>
     <AppShell actor={actor} clinicName={clinic?.name ?? "Your clinic"} current="/admin/services" breadcrumb={breadcrumb}>{children}</AppShell>;
 
-  if (!priceList) return shell(<div className="specimen"><div className="state-panel error-example">
+  if (!priceList || !invoices) return shell(<div className="specimen"><div className="state-panel error-example">
     <p className="empty-state-icon"><TriangleAlert /></p><h3>The price list could not be read</h3>
     <p>Nothing was changed. Confirm the database is running, then reload this page.</p>
   </div></div>);
@@ -26,12 +26,13 @@ export default async function ServicesPage() {
   return shell(<>
     <div className="section-header">
       <div className="section-heading"><div><span className="eyebrow icon-label"><Receipt /> Administration</span>
-        <h2 style={{ marginTop: 6 }}>Price list</h2>
+        <h2 style={{ marginTop: 6 }}>{actor.role === "admin" ? "Price list and invoices" : "Invoices"}</h2>
         <p className="section-description">What this clinic charges for. A visit is invoiced from whatever a clinician adds to it, or from the default service if nothing was added.</p></div></div>
     </div>
     <Services
+      canManagePrices={actor.role === "admin"}
       currency={clinic?.currency ?? "TRY"}
-      timeZone={clinicTimezone()}
+      timeZone={clinic?.timezone ?? clinicTimezone()}
       services={priceList}
       invoices={invoices.map((invoice) => ({ id: invoice.id, encounterId: invoice.encounterId, patientId: invoice.patientId,
         amountMinor: invoice.amountMinor, currency: invoice.currency, status: invoice.status,
