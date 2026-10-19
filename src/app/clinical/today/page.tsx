@@ -15,7 +15,7 @@ const shiftDay = (day: string, offset: number) => new Date(Date.parse(`${day}T00
 export default async function TodayPage({ searchParams }: { searchParams: Promise<{ day?: string }> }) {
   const actor = await requireActor(["clinician"]);
   const { day: requested } = await searchParams;
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor).catch(() => null))?.timezone ?? clinicTimezone();
   const day = /^\d{4}-\d{2}-\d{2}$/.test(requested ?? "") ? requested! : todayInZone(timeZone);
   const breadcrumb = <><span className="breadcrumb-app"><Home /></span><span className="breadcrumb-first">Clinic</span><ChevronRight /><span>Today</span></>;
   let clinicName = "Your clinic";

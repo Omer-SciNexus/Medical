@@ -7,7 +7,7 @@ import type { Actor } from "@/modules/identity";
 // Only routes that exist and that this role may actually open.
 const navigation = {
   clinician: [{ href: "/clinical/today", label: "Today's clinic", icon: ClipboardList }],
-  staff: [{ href: "/staff/board", label: "Waiting room", icon: MonitorCheck }, { href: "/staff/patients", label: "Patients", icon: UserRoundPlus }],
+  staff: [{ href: "/admin/services", label: "Invoices", icon: Receipt }, { href: "/staff/board", label: "Waiting room", icon: MonitorCheck }, { href: "/staff/patients", label: "Patients", icon: UserRoundPlus }],
   patient: [{ href: "/patient/appointments", label: "Appointments", icon: CalendarCheck }, { href: "/patient/book", label: "Book a visit", icon: CalendarPlus }],
   admin: [{ href: "/admin/people", label: "People", icon: Users }, { href: "/admin/schedule", label: "Schedule", icon: CalendarRange },
     { href: "/staff/board", label: "Waiting room", icon: MonitorCheck }, { href: "/staff/patients", label: "Patients", icon: UserRoundPlus },

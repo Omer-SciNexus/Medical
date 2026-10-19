@@ -145,6 +145,19 @@ describe("with a real safety service configured", () => {
       expect(await row(drafted.id)).toMatchObject({ status: "issued", override_reason: reason });
     });
   });
+  it("rejects an expired result and a chart changed after checking", async () => {
+    await asRealProvider(async () => {
+      const drafted = await draftPrescription(clinician(), { encounterId, medicationId: await medicationId("Paracetamol"), ...standardCourse });
+      await owner.query("UPDATE prescriptions SET safety_status='clear', safety_source='integration-safety-service', safety_checked_at=now()-interval '16 minutes' WHERE id=$1", [drafted.id]);
+      await expect(issuePrescription(clinician(), { prescriptionId: drafted.id })).rejects.toBeInstanceOf(EncounterStateError);
+      await owner.query("UPDATE prescriptions SET safety_checked_at=now() WHERE id=$1", [drafted.id]);
+      await recordAllergy(clinician(), { encounterId, substance: "latex", reaction: "Skin rash", severity: "mild" });
+      await expect(issuePrescription(clinician(), { prescriptionId: drafted.id })).rejects.toBeInstanceOf(EncounterStateError);
+      expect((await row(drafted.id)).status).toBe("draft");
+      await owner.query("UPDATE prescriptions SET safety_checked_at=now() WHERE id=$1", [drafted.id]);
+      await expect(issuePrescription(clinician(), { prescriptionId: drafted.id })).resolves.toMatchObject({ status: "issued" });
+    });
+  });
   it("refuses to issue twice, and cancelling leaves the issued one alone", async () => {
     await asRealProvider(async () => {
       const issued = await owner.query("SELECT id FROM prescriptions WHERE status = 'issued' LIMIT 1");

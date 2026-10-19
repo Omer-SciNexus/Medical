@@ -6,6 +6,7 @@ import Redis from "ioredis";
 import { resolveSession, SESSION_COOKIE, allowedAuthOrigins } from "../src/modules/identity";
 import { REALTIME_CHANNEL, authorizeChannel, isChannel, parseNudge, readCookie, type Channel } from "../src/platform/realtime";
 import { logOperational } from "../src/platform/log";
+import { closeRuntimeConnections, validateRuntime } from "../src/platform/runtime";
 
 // Read when the server starts, not when this module loads, so a caller that configures the
 // environment first — a test, or an entry point that loads its own config — is not ignored.
@@ -75,7 +76,7 @@ export async function startRealtime(port = configuredPort()) {
         if (actor && actor.id === subscriber.actorId && actor.clinicId === subscriber.clinicId) return;
         subscriber.socket.close(4401, "session ended");
         subscribers.delete(subscriber);
-      }).catch(() => undefined);
+      }).catch(() => { subscriber.socket.close(1011, "session verification unavailable"); subscribers.delete(subscriber); });
     }
   }, revalidateMs);
 
@@ -95,10 +96,12 @@ export async function startRealtime(port = configuredPort()) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  validateRuntime("realtime");
+  if (process.argv.includes("--check")) { console.log("realtime imports and configuration verified."); process.exit(0); }
   const started = await startRealtime();
   console.log(`Live updates listening on ws://127.0.0.1:${started.port}. Sessions revalidated every ${started.revalidateMs / 1000}s.`);
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.on(signal, () => { void started.stop().then(() => process.exit(0)); });
+    process.on(signal, () => { void started.stop().then(closeRuntimeConnections).then(() => process.exit(0)); });
   }
   process.on("uncaughtException", () => logOperational("job.failed", { code: "REALTIME_FAILED" }));
 }

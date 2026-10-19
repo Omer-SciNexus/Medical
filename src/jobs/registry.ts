@@ -2,7 +2,7 @@ import "server-only";
 import { recordSystemEvent, findPortalContact, verifyChainFully } from "@/modules/identity";
 import { readSummaryForNotification } from "@/modules/clinical";
 import { findChargeForNotification } from "@/modules/billing";
-import { sendMail } from "@/platform/mailer";
+import { sendJobMail } from "@/platform/mailer";
 import { scheduleAppointmentReminders, sendAppointmentReminder } from "./reminders";
 
 export type JobPayload = Record<string, string>;
@@ -23,7 +23,7 @@ const handlers: Record<string, (payload: JobPayload) => Promise<unknown>> = {
     if (!summary?.publishedAt) return { sent: false, reason: "not published" };
     const contact = await findPortalContact(payload.clinicId, summary.patientId);
     if (!contact) return { sent: false, reason: "no portal account" };
-    await sendMail({ to: contact.email, subject: "Your visit summary is ready",
+    await sendJobMail({ to: contact.email, subject: "Your visit summary is ready", idempotencyKey: `summary-${payload.resourceId}`,
       text: "Your clinician has published the summary of your recent visit. Sign in to your clinic portal to read it." });
     await recordSystemEvent({ clinicId: payload.clinicId, patientId: summary.patientId, action: "clinical.summary_notified", purpose: "patient.view", resourceId: payload.resourceId });
     return { sent: true };

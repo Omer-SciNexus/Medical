@@ -21,7 +21,7 @@ export default async function PatientChartPage({ params }: { params: Promise<{ u
   const actor = await requireActor(["clinician"]);
   const { uuid } = await params;
   if (!uuidPattern.test(uuid)) notFound();
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor).catch(() => null))?.timezone ?? clinicTimezone();
   const [clinic, view] = await Promise.all([getClinicSettings(actor), getPatientChartView(actor, uuid).catch(() => null)]);
   const documents = view ? await listPatientDocuments(actor, uuid).catch(() => []) : [];
   const breadcrumb = <><span className="breadcrumb-app"><Home /></span><Link className="breadcrumb-first" href="/clinical/today">Today</Link><ChevronRight /><span>Chart</span></>;

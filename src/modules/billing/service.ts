@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { getDb, type Transaction } from "@/platform/db";
-import { auditedPatientOperation, type Actor } from "@/modules/identity";
+import { assertClinicRole, auditedBillingOperation, recordScopedEvent, auditedPatientOperation, type Actor } from "@/modules/identity";
 import { isUniqueViolation } from "@/platform/errors";
 import {
   findChargeById, findChargeForEncounter, findChargeOutsideTransaction, findDefaultService, findService, insertChargeLine, insertService,
@@ -76,7 +76,7 @@ export async function removeVisitCharge(actor: Actor, input: unknown, context: {
   return getDb().transaction((tx) => auditedPatientOperation(tx, actor, context.patientId, "clinical.write", "billing.charge_line_removed", async () => {
     const charge = await findChargeForEncounter(tx, actor.clinicId, context.encounterId);
     if (!charge || charge.status !== "pending") throw new BillingError("This invoice can no longer be changed.");
-    if (!await removeChargeLine(actor, charge.id, lineId)) throw new BillingError("That line has already been removed.");
+    if (!await removeChargeLine(tx, actor, charge.id, lineId)) throw new BillingError("That line has already been removed.");
   }));
 }
 export async function getVisitInvoice(clinicId: string, encounterId: string) {
@@ -91,8 +91,8 @@ export async function settleInvoice(actor: Actor, input: unknown) {
   const existing = await findChargeById(actor.clinicId, chargeId);
   if (!existing) throw new BillingError("That invoice could not be found.");
   if (existing.status !== "pending") throw new BillingError(`This invoice is already ${existing.status}.`);
-  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, existing.patientId, "scheduling", "billing.charge_paid", async () => {
-    const settled = await settleCharge(actor, chargeId, method);
+  return getDb().transaction((tx) => auditedBillingOperation(tx, actor, existing.patientId, "billing.charge_paid", async () => {
+    const settled = await settleCharge(tx, actor, chargeId, method);
     if (!settled) throw new BillingError("This invoice changed while you were looking at it. Reload to see its current state.");
     return settled;
   }));
@@ -103,15 +103,20 @@ export async function voidInvoice(actor: Actor, input: unknown) {
   const existing = await findChargeById(actor.clinicId, chargeId);
   if (!existing) throw new BillingError("That invoice could not be found.");
   if (existing.status !== "pending") throw new BillingError(`This invoice is already ${existing.status}.`);
-  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, existing.patientId, "scheduling", "billing.charge_voided", async () => {
-    const voided = await voidChargeRow(actor, chargeId, reason);
+  return getDb().transaction((tx) => auditedBillingOperation(tx, actor, existing.patientId, "billing.charge_voided", async () => {
+    const voided = await voidChargeRow(tx, actor, chargeId, reason);
     if (!voided) throw new BillingError("This invoice changed while you were looking at it. Reload to see its current state.");
     return voided;
   }));
 }
 export async function listInvoices(actor: Actor, status?: string) {
   requireFrontDesk(actor);
-  return listClinicCharges(actor.clinicId, status);
+  return getDb().transaction(async (tx) => {
+    await assertClinicRole(actor, ["staff", "admin"], tx);
+    const invoices = await listClinicCharges(actor.clinicId, status, tx);
+    await recordScopedEvent(actor, { action: "billing.invoices_read", purpose: "billing" }, tx);
+    return invoices;
+  });
 }
 /**
  * Falls back to the clinic's default service when a visit closes with nothing on its invoice,

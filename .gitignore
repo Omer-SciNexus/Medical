@@ -1,6 +1,10 @@
 node_modules/
 .npm-cache/
 .next/
+.next-dev/
+.next-test/
+.harness/
+vitest.harness.config.ts
 out/
 coverage/
 test-results/

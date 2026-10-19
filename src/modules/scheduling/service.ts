@@ -1,13 +1,13 @@
 import "server-only";
 import { z } from "zod";
-import { recordScopedEvent, type Actor } from "@/modules/identity";
+import { getClinicSettings, recordScopedEvent, type Actor } from "@/modules/identity";
 import { auditedPatientOperation } from "@/modules/identity";
 import { getDb, type Transaction } from "@/platform/db";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { addClinicDays, clinicDayRange, clinicTimezone, todayInZone, weekdayOf, zonedInstant, zonedStartOfDay } from "@/lib/clinic-day";
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientRegistrationSchema, patientSearchSchema, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
-import { claimSlot, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findPatientIdentity, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
+import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findPatientIdentity, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
 // here would recurse. It returns only scope membership and is not a Server Action.
@@ -64,7 +64,7 @@ export async function listMyAppointmentOptions(actor: Actor, providerId: string)
 export async function getClinicianQueue(actor: Actor, input: unknown) {
   const { day } = queryDaySchema.parse(input ?? {});
   if (actor.role !== "clinician" || !actor.mfaVerified) throw new AccessScopeError();
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor))?.timezone ?? clinicTimezone();
   const clinicDay = day ?? todayInZone(timeZone);
   const { from, to } = clinicDayRange(clinicDay, timeZone);
   const rows = await listProviderQueue(actor.clinicId, actor.id, from, to);
@@ -80,7 +80,7 @@ export async function getClinicianQueue(actor: Actor, input: unknown) {
 export async function getWaitingRoomBoard(actor: Actor, input: unknown) {
   requireFrontDesk(actor);
   const { day } = queryDaySchema.parse(input ?? {});
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor))?.timezone ?? clinicTimezone();
   const clinicDay = day ?? todayInZone(timeZone);
   const { from, to } = clinicDayRange(clinicDay, timeZone);
   const rows = await listWaitingRoom(actor.clinicId, from, to);
@@ -95,7 +95,7 @@ export async function getWaitingRoomBoard(actor: Actor, input: unknown) {
 export async function getClinicReport(actor: Actor, input: unknown) {
   requireScheduleAdmin(actor);
   const { from, days } = reportRangeSchema.parse(input ?? {});
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor))?.timezone ?? clinicTimezone();
   const start = from ?? addClinicDays(todayInZone(timeZone), -days);
   const end = addClinicDays(start, days);
   const window = { from: zonedStartOfDay(start, timeZone), to: zonedStartOfDay(end, timeZone) };
@@ -118,7 +118,7 @@ const MRN_PREFIX = "MR-";
 export async function registerPatient(actor: Actor, input: unknown) {
   requireFrontDesk(actor);
   const details = patientRegistrationSchema.parse(input);
-  if (details.birthDate > todayInZone(clinicTimezone())) throw new PatientRegistrationError("A date of birth cannot be in the future.");
+  if (details.birthDate > todayInZone((await getClinicSettings(actor))?.timezone ?? clinicTimezone())) throw new PatientRegistrationError("A date of birth cannot be in the future.");
   if (details.mrn) {
     try {
       return await recordPatient(actor, { ...details, mrn: details.mrn });
@@ -159,7 +159,7 @@ function requireScheduleAdmin(actor: Actor) {
 }
 export async function getScheduleAuthoring(actor: Actor) {
   requireScheduleAdmin(actor);
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor))?.timezone ?? clinicTimezone();
   const [templates, blackouts] = await Promise.all([listTemplates(actor.clinicId), listBlackouts(actor.clinicId, zonedStartOfDay(todayInZone(timeZone), timeZone))]);
   return { timeZone, templates, blackouts };
 }
@@ -187,7 +187,7 @@ export async function removeAvailabilityTemplate(actor: Actor, input: unknown) {
 export async function addScheduleBlackout(actor: Actor, input: unknown) {
   requireScheduleAdmin(actor);
   const { providerId, day, endDay, reason } = blackoutSchema.parse(input);
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor))?.timezone ?? clinicTimezone();
   const last = endDay ?? day;
   if (last < day) throw new ScheduleAuthoringError("The last day cannot be before the first day.");
   const startsAt = zonedStartOfDay(day, timeZone);
@@ -211,7 +211,7 @@ export async function removeScheduleBlackout(actor: Actor, input: unknown) {
 export async function extendProviderSchedule(actor: Actor, input: unknown) {
   requireScheduleAdmin(actor);
   const { providerId, weeks } = extendScheduleSchema.parse(input);
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor))?.timezone ?? clinicTimezone();
   const today = todayInZone(timeZone);
   const [templates, blackouts] = await Promise.all([listTemplates(actor.clinicId), listBlackouts(actor.clinicId, zonedStartOfDay(today, timeZone))]);
   const mine = templates.filter((template) => template.providerId === providerId);
@@ -238,7 +238,7 @@ export async function extendProviderSchedule(actor: Actor, input: unknown) {
 }
 export async function getProviderSlotCount(actor: Actor, providerId: string, days = 28) {
   requireScheduleAdmin(actor);
-  const timeZone = clinicTimezone();
+  const timeZone = (await getClinicSettings(actor))?.timezone ?? clinicTimezone();
   const today = todayInZone(timeZone);
   const slots = await listProviderSlots(actor.clinicId, z.uuid().parse(providerId), zonedStartOfDay(today, timeZone), zonedStartOfDay(addClinicDays(today, days), timeZone));
   return slots.length;
@@ -267,4 +267,16 @@ export async function getPatientIdentity(actor: Actor, patientId: string) {
     if (!patient) throw new AccessScopeError();
     return patient;
   }));
+}
+
+/** The clinical start transaction already authorizes and audits clinical write access. */
+export async function beginAppointmentInTransaction(tx: Transaction, actor: Actor, input: { appointmentId: string; patientId: string; revision: number }) {
+  if (actor.role !== "clinician" || !actor.mfaVerified) throw new AccessScopeError();
+  return beginAppointment(tx, actor, input);
+}
+
+export async function listMyAppointmentPage(actor: Actor, input: unknown) {
+  const page = z.object({ view: z.enum(["upcoming", "past"]).default("upcoming"), number: z.coerce.number().int().min(1).max(10000).default(1) }).parse(input);
+  const rows = await listPatientAppointments(actor, ownPatientId(actor), { ...page, at: new Date() });
+  return { entries: rows.slice(0, 25), hasMore: rows.length > 25, ...page };
 }
