@@ -17,7 +17,7 @@ export default async function AcceptInvitePage({ searchParams }: { searchParams:
     <span className="public-eyebrow">INVITATION</span>
     <h1>This link cannot be used.</h1>
     <p className="auth-description">It may have expired, been used already, or been revoked. Ask whoever invited you to send a new one — each link is single-use.</p>
-    <p className="auth-switch"><Link href="/sign-in">Go to sign-in</Link></p>
+    <p className="auth-switch"><Link href="/sign-in" prefetch={false}>Go to sign-in</Link></p>
   </div>;
   return <AuthForm mode="accept-invite" configured={authConfigured()} invitation={{ ...invitation, token }} />;
 }

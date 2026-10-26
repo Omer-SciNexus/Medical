@@ -4,6 +4,7 @@ import * as React from "react";
 import { useActionState } from "react";
 import { Loader2, Plus, Receipt, Trash2 } from "lucide-react";
 import { Badge, Button, Field, Input } from "@/components/ui/primitives";
+import { ConfirmForm } from "@/components/ui/confirm-form";
 import { money } from "@/lib/format";
 import { idleAction } from "@/lib/action-state";
 import { addChargeLineAction, removeChargeLineAction } from "@/app/clinical/actions";
@@ -32,9 +33,9 @@ export function VisitCharges({ encounterId, open, currency, status, totalMinor, 
           <td className="numeric">{line.quantity}</td>
           <td className="numeric">{money(line.unitAmountMinor, currency)}</td>
           <td className="numeric">{money(line.amountMinor, currency)}</td>
-          {open && status === "pending" ? <td><form action={remove}>
+          {open && status === "pending" ? <td><ConfirmForm action={remove} title={`Remove ${line.description} from this visit?`} description={`${money(line.amountMinor, currency)} will no longer be charged for this visit.`} confirmLabel="Remove charge">
             <input type="hidden" name="encounterId" value={encounterId} /><input type="hidden" name="lineId" value={line.id} />
-            <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Remove</Button></form></td> : null}
+            <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Remove</Button></ConfirmForm></td> : null}
         </tr>)}</tbody>
         <tfoot><tr><th scope="row" colSpan={3}>Total</th><td className="numeric"><strong>{money(totalMinor, currency)}</strong></td>{open && status === "pending" ? <td /> : null}</tr></tfoot>
       </table>

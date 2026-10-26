@@ -3,7 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 
 // These routes resolve their own actor. An anonymous or malformed session reaches the
 // sign-in page without touching the database, so this suite needs no infrastructure.
-const protectedRoutes = ["/clinical/today", "/patient/book", "/admin/audit",
+const protectedRoutes = ["/dashboard", "/clinical/today", "/patient/book", "/admin/audit",
   "/clinical/encounters/00000000-0000-4000-8000-000000000500", "/patient/visits/00000000-0000-4000-8000-000000000500"];
 
 test.describe("protected clinical routes", () => {
