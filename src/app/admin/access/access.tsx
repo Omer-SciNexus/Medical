@@ -4,6 +4,7 @@ import * as React from "react";
 import { useActionState } from "react";
 import { Inbox, Loader2, ShieldOff, Siren } from "lucide-react";
 import { Badge, Button, Input } from "@/components/ui/primitives";
+import { ConfirmForm } from "@/components/ui/confirm-form";
 import { clinicalDate } from "@/lib/format";
 import { idleAction } from "@/lib/action-state";
 import { revokeAccessGrantAction } from "@/app/admin/actions";
@@ -42,8 +43,8 @@ export function Access({ grants, timeZone }: { grants: Grant[]; timeZone: string
             <td className="mono">{grant.purpose}</td>
             <td><time className="mono">{clinicalDate(grant.createdAt, new Date(), timeZone)}</time></td>
             <td>{grant.expiresAt ? <time className="mono">{clinicalDate(grant.expiresAt, new Date(), timeZone)}</time> : <span className="field-hint">until withdrawn</span>}</td>
-            <td><form action={revoke}><input type="hidden" name="relationshipId" value={grant.id} />
-              <Button type="submit" size="small" variant="ghost" disabled={pending}>{pending ? <Loader2 /> : <ShieldOff />}Withdraw</Button></form></td>
+            <td><ConfirmForm action={revoke} title={`Withdraw ${grant.actorName}'s access?`} description="They will no longer be able to open this patient's record through this grant. The withdrawal is recorded in the audit log." confirmLabel="Withdraw access"><input type="hidden" name="relationshipId" value={grant.id} />
+              <Button type="submit" size="small" variant="ghost" disabled={pending}>{pending ? <Loader2 /> : <ShieldOff />}Withdraw</Button></ConfirmForm></td>
           </tr>)}</tbody>
         </table>
       </div>}

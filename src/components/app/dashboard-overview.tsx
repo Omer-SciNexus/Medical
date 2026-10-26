@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, CalendarDays, CalendarPlus, CalendarRange, CheckCheck, ChevronRight, ClipboardList, Clock3, FileText, Inbox, Receipt, ShieldCheck, Stethoscope, Users } from "lucide-react";
 import type { Actor } from "@/modules/identity";
+import { greetingName } from "@/lib/format";
 
 const icons = { calendar: CalendarDays, people: Users, clock: Clock3, complete: CheckCheck, document: FileText };
 export type DashboardMetric = { label: string; value: number; hint: string; href: string; icon: keyof typeof icons };
@@ -55,7 +56,7 @@ export function DashboardOverview({ role, name, clinicName, day, timeZone, verif
   const formattedDay = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" }).format(date);
   return <div className="dashboard-overview">
     <div className="dashboard-heading">
-      <div><span className="eyebrow">{workspace.label}</span><h1>Welcome back, {name.trim().split(/\s+/)[0]}<span>.</span></h1><p>{workspace.introduction}</p></div>
+      <div><span className="eyebrow">{workspace.label}</span><h1>Welcome back, {greetingName(name)}<span>.</span></h1><p>{workspace.introduction}</p></div>
       <div className="dashboard-date"><CalendarDays aria-hidden="true" /><div><time dateTime={day}>{formattedDay}</time><span>{timeZone}</span></div></div>
     </div>
     {summary ? <>

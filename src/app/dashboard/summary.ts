@@ -34,7 +34,8 @@ export async function readDashboardSummary(actor: Actor, timeZone: string, now =
   }
   if (actor.role === "patient") {
     const [appointments, visits] = await Promise.all([listMyAppointments(actor), listMyVisits(actor)]);
-    const upcoming = appointments.filter(item => item.startsAt.getTime() > now.getTime() && !terminal.has(item.status)).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+    // A visit under way (or a patient running late) still belongs here until its slot ends.
+    const upcoming = appointments.filter(item => item.endsAt.getTime() > now.getTime() && !terminal.has(item.status)).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
     const published = visits.filter(item => item.publishedAt).sort((a, b) => b.publishedAt!.getTime() - a.publishedAt!.getTime());
     const next = upcoming[0];
     return {

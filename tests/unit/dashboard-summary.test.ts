@@ -53,6 +53,15 @@ describe("dashboard overview data", () => {
     expect(services.listMyAppointments).toHaveBeenCalledWith(patient);
     expect(services.getClinicianQueue).not.toHaveBeenCalled();
   });
+  it("keeps a patient's visit in view while it is under way or they are running late, until the slot ends", async () => {
+    services.listMyAppointments.mockResolvedValue([appointment("consulting", "in_progress", "2026-10-26T05:50:00Z"), appointment("late", "booked", "2026-10-26T05:55:00Z"), appointment("ended", "booked", "2026-10-26T05:30:00Z")]);
+    services.listMyVisits.mockResolvedValue([]);
+    const summary = await readDashboardSummary(actor("patient"), "Europe/Istanbul", now);
+    expect(summary.rows.map(item => item.id)).toEqual(["consulting", "late"]);
+    expect(summary.rows[0].status).toBe("In consultation");
+    expect(summary.focus.href).toBe("/patient/appointments");
+    expect(summary.metrics[0].value).toBe(2);
+  });
   it("offers booking and an honest zero state when a patient has no visits", async () => {
     services.listMyAppointments.mockResolvedValue([]);
     services.listMyVisits.mockResolvedValue([]);

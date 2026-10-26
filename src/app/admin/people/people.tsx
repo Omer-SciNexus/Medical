@@ -102,8 +102,8 @@ export function People({ people, invitations, self, mailConfigured }: { people: 
                 <td>{state.label === "accepted" || state.label === "revoked" ? <span className="field-hint">—</span> : <div className="row-actions">
                   <form action={resend}><input type="hidden" name="invitationId" value={invitation.id} />
                     <Button type="submit" size="small" variant="secondary" disabled={pending}><MailPlus />New link</Button></form>
-                  <form action={revokeInvitation}><input type="hidden" name="invitationId" value={invitation.id} />
-                    <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Revoke</Button></form>
+                  <ConfirmForm action={revokeInvitation} title={`Revoke the invitation for ${invitation.displayName}?`} description={`The link sent to ${invitation.email} will stop working immediately. You can send a new invitation later.`} confirmLabel="Revoke invitation"><input type="hidden" name="invitationId" value={invitation.id} />
+                    <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Revoke</Button></ConfirmForm>
                 </div>}</td>
               </tr>;
             })}</tbody>
