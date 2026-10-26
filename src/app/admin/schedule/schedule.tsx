@@ -4,6 +4,7 @@ import * as React from "react";
 import { useActionState } from "react";
 import { CalendarOff, CalendarPlus, Clock, Loader2, Plus, Trash2, Wand2 } from "lucide-react";
 import { Badge, Button, Field, Input } from "@/components/ui/primitives";
+import { ConfirmForm } from "@/components/ui/confirm-form";
 import { idleAction } from "@/lib/action-state";
 import { addBlackoutAction, addTemplateAction, extendScheduleAction, removeBlackoutAction, removeTemplateAction } from "@/app/admin/actions";
 
@@ -31,10 +32,7 @@ export function Schedule({ providers, templates, blackouts, timeZone }: { provid
   const weekly = mine.reduce((total, template) => total + slotCount(template), 0);
 
   return <>
-    <div className="provider-tabs" role="tablist" aria-label="Clinicians">
-      {providers.map((provider) => <button key={provider.id} role="tab" type="button" className="shortcut-button" aria-selected={provider.id === selected}
-        data-active={provider.id === selected} onClick={() => setSelected(provider.id)}>{provider.displayName}</button>)}
-    </div>
+    <div className="provider-picker"><Field label="Clinician" id="schedule-provider"><select id="schedule-provider" className="input" value={selected} onChange={(event) => setSelected(event.target.value)} disabled={!providers.length}>{!providers.length && <option value="">No clinicians available</option>}{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}</select></Field></div>
     {error ? <p className="field-error" role="alert" style={{ marginBottom: 14 }}>{error}</p> : null}
     {notice ? <p className="field-hint" role="status" style={{ marginBottom: 14 }}>{notice}</p> : null}
 
@@ -69,8 +67,8 @@ export function Schedule({ providers, templates, blackouts, timeZone }: { provid
             <td className="mono">{clock(template.startMinute)}&ndash;{clock(template.endMinute)}</td>
             <td>{template.slotMinutes} min</td>
             <td className="numeric">{slotCount(template)}</td>
-            <td><form action={removeTemplate}><input type="hidden" name="templateId" value={template.id} />
-              <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Remove</Button></form></td>
+            <td><ConfirmForm action={removeTemplate} title={`Remove the ${WEEKDAYS[template.weekday]} ${clock(template.startMinute)}–${clock(template.endMinute)} session?`} description="No new appointment times will be generated from it. Appointments that are already booked are not affected." confirmLabel="Remove session"><input type="hidden" name="templateId" value={template.id} />
+              <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Remove</Button></ConfirmForm></td>
           </tr>)}</tbody>
         </table>
       </div>}
@@ -109,8 +107,8 @@ export function Schedule({ providers, templates, blackouts, timeZone }: { provid
             <td><time className="mono">{blackout.startsAt.slice(0, 10)}</time></td>
             <td><time className="mono">{new Date(Date.parse(blackout.endsAt) - 1).toISOString().slice(0, 10)}</time></td>
             <td>{blackout.reason}</td>
-            <td><form action={removeBlackout}><input type="hidden" name="blackoutId" value={blackout.id} />
-              <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Lift</Button></form></td>
+            <td><ConfirmForm action={removeBlackout} title="Lift this blackout?" description={`The dates from ${blackout.startsAt.slice(0, 10)} will no longer be skipped when appointment times are generated.`} confirmLabel="Lift blackout"><input type="hidden" name="blackoutId" value={blackout.id} />
+              <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Lift</Button></ConfirmForm></td>
           </tr>)}</tbody>
         </table>
       </div>}

@@ -4,7 +4,7 @@ import { MeridianMark } from "@/components/design/graphics";
 /** Editorial product illustration. All names and appointments are fictional. */
 export function WorkspaceIllustration() {
   return <figure className="product-illustration" aria-label="Illustration of a Meridian clinic schedule using synthetic appointments">
-    <div className="product-orbit orbit-one" /><div className="product-orbit orbit-two" />
+    <div className="product-toast" aria-hidden="true"><span className="toast-dot" /><div><strong>Alex Davis checked in</strong><span>09:00 · Follow-up</span></div></div>
     <div className="product-window" aria-hidden="true">
       <div className="product-rail"><MeridianMark /><span className="rail-active"><LayoutDashboard /></span><CalendarDays /><Users /><ClipboardList /><span className="rail-avatar">AK</span></div>
       <div className="product-main">
