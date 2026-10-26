@@ -4,6 +4,7 @@ import * as React from "react";
 import { useActionState } from "react";
 import { CircleCheck, FileSignature, Loader2, PenLine, Receipt, RefreshCw, Sparkles, TriangleAlert } from "lucide-react";
 import { Button, Field, Modal, Textarea } from "@/components/ui/primitives";
+import { ConfirmForm } from "@/components/ui/confirm-form";
 import { money } from "@/lib/format";
 import { NoteDraft } from "@/lib/note-draft";
 import { idleAction } from "@/lib/action-state";
@@ -133,7 +134,7 @@ export function NoteEditor({ note, encounter, charge, fee, aiEnabled }: {
     {note.status === "signed" && encounter.status === "in_progress" ? <section className="complete-visit">
       <h3><Receipt /> Complete the visit</h3>
       <p className="muted">Completing records one charge, marks the appointment done and publishes the summary the patient reads. It cannot be undone from this screen.</p>
-      <form action={complete}>
+      <ConfirmForm action={complete} title="Complete and publish this visit?" description={`The patient summary you entered will be published, an invoice of ${money(fee.amountMinor, fee.currency)} will be recorded, and this appointment will be marked complete. Review your summary before continuing.`} confirmLabel="Complete and publish">
         <input type="hidden" name="encounterId" value={encounter.id} />
         <Field label="Patient visit summary" id="visit-summary" error={completeState.errors?.summary?.[0]} hint="Plain language, written by you. This is the text the patient sees.">
           <Textarea id="visit-summary" name="summary" rows={5} required minLength={20} defaultValue={completeState.values?.summary} />
@@ -141,7 +142,7 @@ export function NoteEditor({ note, encounter, charge, fee, aiEnabled }: {
         {completeState.error ? <p className="field-error" role="alert">{completeState.error}</p> : null}
         <div className="form-footer"><span className="save-status">Invoice so far: {money(fee.amountMinor, fee.currency)}, charged once per visit.</span>
           <Button type="submit" disabled={completePending}>{completePending ? <Loader2 /> : <CircleCheck />} Complete visit</Button></div>
-      </form>
+      </ConfirmForm>
     </section> : null}
 
     {encounter.status === "completed" ? <section className="complete-visit" data-done="true">

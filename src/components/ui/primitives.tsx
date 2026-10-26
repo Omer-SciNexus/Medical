@@ -20,10 +20,26 @@ export function Badge({ children, tone = "neutral", className }: { children: Rea
 export function Input({ className, ...props }: React.ComponentProps<"input">) { return <input className={cn("input", className)} {...props} />; }
 export function Textarea({ className, ...props }: React.ComponentProps<"textarea">) { return <textarea className={cn("input textarea", className)} {...props} />; }
 export function Field({ label, id, children, error, hint, className }: { label: string; id: string; children: React.ReactNode; error?: string; hint?: string; className?: string }) {
-  return <div className={cn("field", className)}><label htmlFor={id}>{label}</label>{children}{error ? <p id={`${id}-error`} className="field-error" role="alert">{error}</p> : hint ? <p id={`${id}-hint`} className="field-hint">{hint}</p> : null}</div>;
+  const fieldRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!error) return;
+    const field = fieldRef.current;
+    const control = field?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    const first = field?.closest("form")?.querySelector('[aria-invalid="true"]');
+    if (control && (!first || control === first)) control.focus();
+  }, [error]);
+  const description = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
+  const controls = React.Children.map(children, (child) => {
+    if (!React.isValidElement<{ id?: string; "aria-describedby"?: string; "aria-invalid"?: React.AriaAttributes["aria-invalid"] }>(child) || child.props.id !== id) return child;
+    return React.cloneElement(child, {
+      "aria-invalid": error ? true : child.props["aria-invalid"],
+      "aria-describedby": [child.props["aria-describedby"], description].filter(Boolean).join(" ") || undefined,
+    });
+  });
+  return <div ref={fieldRef} className={cn("field", className)}><label htmlFor={id}>{label}</label>{controls}{error ? <p id={`${id}-error`} className="field-error" role="alert">{error}</p> : hint ? <p id={`${id}-hint`} className="field-hint">{hint}</p> : null}</div>;
 }
-export function Select({ id, value, onValueChange, placeholder, options, label, disabled }: { id: string; value?: string; onValueChange?: (value: string) => void; placeholder?: string; options: { value: string; label: string }[]; label: string; disabled?: boolean }) {
-  return <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}><SelectPrimitive.Trigger id={id} className="input select-trigger" aria-label={label}><SelectPrimitive.Value placeholder={placeholder} /><SelectPrimitive.Icon><ChevronDown /></SelectPrimitive.Icon></SelectPrimitive.Trigger><SelectPrimitive.Portal><SelectPrimitive.Content position="popper" sideOffset={5} className="floating select-content"><SelectPrimitive.Viewport>{options.map((option) => <SelectPrimitive.Item key={option.value} value={option.value} className="select-item"><SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText><SelectPrimitive.ItemIndicator><Check /></SelectPrimitive.ItemIndicator></SelectPrimitive.Item>)}</SelectPrimitive.Viewport></SelectPrimitive.Content></SelectPrimitive.Portal></SelectPrimitive.Root>;
+export function Select({ id, value, onValueChange, placeholder, options, label, disabled, ...a11y }: { id: string; value?: string; onValueChange?: (value: string) => void; placeholder?: string; options: { value: string; label: string }[]; label: string; disabled?: boolean } & Pick<React.AriaAttributes, "aria-describedby" | "aria-invalid">) {
+  return <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}><SelectPrimitive.Trigger {...a11y} id={id} className="input select-trigger" aria-label={label}><SelectPrimitive.Value placeholder={placeholder} /><SelectPrimitive.Icon><ChevronDown /></SelectPrimitive.Icon></SelectPrimitive.Trigger><SelectPrimitive.Portal><SelectPrimitive.Content position="popper" sideOffset={5} className="floating select-content"><SelectPrimitive.Viewport>{options.map((option) => <SelectPrimitive.Item key={option.value} value={option.value} className="select-item"><SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText><SelectPrimitive.ItemIndicator><Check /></SelectPrimitive.ItemIndicator></SelectPrimitive.Item>)}</SelectPrimitive.Viewport></SelectPrimitive.Content></SelectPrimitive.Portal></SelectPrimitive.Root>;
 }
 export function Checkbox({ id, checked, onCheckedChange, children }: { id: string; checked: boolean; onCheckedChange: (checked: boolean) => void; children: React.ReactNode }) {
   return <div className="check-field"><CheckboxPrimitive.Root id={id} className="checkbox" checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)}><CheckboxPrimitive.Indicator><Check /></CheckboxPrimitive.Indicator></CheckboxPrimitive.Root><label htmlFor={id}>{children}</label></div>;
