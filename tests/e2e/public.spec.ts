@@ -125,3 +125,9 @@ test("leaving the dark preview restores the public page theme", async ({ page })
   await expect(page).toHaveURL("/");
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", "dark");
 });
+
+test("password recovery is directly accessible without opening help", async ({ page }) => {
+  await page.goto("/sign-in");
+  await page.getByRole("link", { name: "Forgot password?", exact: true }).click();
+  await expect(page).toHaveURL("/forgot-password");
+});
