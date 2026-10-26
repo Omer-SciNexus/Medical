@@ -704,11 +704,17 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 .integrity-banner p { color: var(--ink-600); font-size: 11px; line-height: 1.65; margin-top: 5px; max-width: 760px; }
 .integrity-broken { border-color: var(--critical); background: var(--allergy-soft); }
 .integrity-broken svg, .integrity-broken strong { color: var(--critical); }
-.audit-filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; align-items: end; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 18px 20px; margin-bottom: 20px; }
+.audit-filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; align-items: start; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 18px 20px; margin-bottom: 20px; }
 .audit-filter-actions { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; }
 .audit-table td { font-size: 11px; }
 .audit-table td svg { width: 11px; height: 11px; vertical-align: -1px; color: var(--ink-400); }
 .admin-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: end; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 18px 20px; margin-bottom: 18px; }
+.invitation-form { align-items: start; }
+.service-form { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; }
+.service-default-heading { font-weight: 500; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-600); }
+.service-default-field > .service-default-option { display: flex; align-items: center; gap: 10px; min-height: var(--control-height); padding: 7px 10px; border: 1px solid var(--input-line); border-radius: 6px; color: var(--ink-900); background: var(--paper); font-size: 13px; font-weight: 400; line-height: 1.5; text-transform: none; letter-spacing: normal; cursor: pointer; }
+.service-default-option input { width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--accent); }
+.service-default-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
 .admin-form-actions { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .invite-link { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--line)); background: var(--accent-soft); border-radius: 8px; padding: 13px 16px; margin-bottom: 20px; }
@@ -795,6 +801,7 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
   .vitals-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .booking-form { grid-template-columns: minmax(0, 1fr) 270px; gap: 26px; }
   .audit-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .service-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 1020px) {
   .encounter-aside, .booking-review { position: static; }
@@ -817,6 +824,7 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
   .visit-list li { flex-direction: column; align-items: flex-start; gap: 12px; }
   .visit-summary { padding: 20px; }
   .audit-filters { grid-template-columns: 1fr; padding: 16px; }
+  .invitation-form, .service-form { grid-template-columns: 1fr; padding: 16px; }
   .integrity-banner { padding: 12px 14px; }
   .provider-option { padding: 13px 15px; min-height: 60px; }
 }
