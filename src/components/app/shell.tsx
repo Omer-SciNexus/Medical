@@ -1,15 +1,17 @@
 import Link from "next/link";
-import { CalendarCheck, CalendarPlus, CalendarRange, ChartNoAxesColumn, ClipboardList, KeyRound, LogOut, MonitorCheck, Radio, Receipt, ScrollText, ShieldCheck, UserRoundPlus, Users } from "lucide-react";
+import { WorkspaceNavigation } from "./workspace-navigation";
+import { LayoutDashboard, CalendarCheck, CalendarPlus, CalendarRange, ChartNoAxesColumn, ClipboardList, KeyRound, LogOut, MonitorCheck, Radio, Receipt, ScrollText, ShieldCheck, UserRoundPlus, Users } from "lucide-react";
 import { MeridianMark } from "@/components/design/graphics";
 import { signOutAction } from "@/app/(auth)/actions";
 import type { Actor } from "@/modules/identity";
 
 // Only routes that exist and that this role may actually open.
+const overview = { href: "/dashboard", label: "Overview", icon: LayoutDashboard };
 const navigation = {
-  clinician: [{ href: "/clinical/today", label: "Today's clinic", icon: ClipboardList }],
-  staff: [{ href: "/admin/services", label: "Invoices", icon: Receipt }, { href: "/staff/board", label: "Waiting room", icon: MonitorCheck }, { href: "/staff/patients", label: "Patients", icon: UserRoundPlus }],
-  patient: [{ href: "/patient/appointments", label: "Appointments", icon: CalendarCheck }, { href: "/patient/book", label: "Book a visit", icon: CalendarPlus }],
-  admin: [{ href: "/admin/people", label: "People", icon: Users }, { href: "/admin/schedule", label: "Schedule", icon: CalendarRange },
+  clinician: [overview, { href: "/clinical/today", label: "Today's clinic", icon: ClipboardList }],
+  staff: [overview, { href: "/admin/services", label: "Invoices", icon: Receipt }, { href: "/staff/board", label: "Waiting room", icon: MonitorCheck }, { href: "/staff/patients", label: "Patients", icon: UserRoundPlus }],
+  patient: [overview, { href: "/patient/appointments", label: "Appointments", icon: CalendarCheck }, { href: "/patient/book", label: "Book a visit", icon: CalendarPlus }],
+  admin: [overview, { href: "/admin/people", label: "People", icon: Users }, { href: "/admin/schedule", label: "Schedule", icon: CalendarRange },
     { href: "/staff/board", label: "Waiting room", icon: MonitorCheck }, { href: "/staff/patients", label: "Patients", icon: UserRoundPlus },
     { href: "/admin/access", label: "Access", icon: KeyRound }, { href: "/admin/services", label: "Price list", icon: Receipt }, { href: "/admin/reports", label: "Report", icon: ChartNoAxesColumn }, { href: "/admin/outbox", label: "Event delivery", icon: Radio },
     { href: "/admin/audit", label: "Access log", icon: ScrollText }],
@@ -18,17 +20,17 @@ const navigation = {
 export function AppShell({ actor, clinicName, current, breadcrumb, children, register = "clinical" }: {
   actor: Actor; clinicName: string; current: string; breadcrumb: React.ReactNode; children: React.ReactNode; register?: "clinical" | "patient";
 }) {
-  return <div className={`app-shell${register === "patient" ? " patient-register" : ""}`}>
+  return <div className={`app-shell workspace-app${register === "patient" ? " patient-register" : ""}`}>
     <a className="skip-link" href="#main">Skip to content</a>
     <aside className="sidebar">
       <Link href="/dashboard" className="brand" aria-label="Meridian workspace"><span className="brand-mark"><MeridianMark /></span><span>meridian<span className="brand-period">.</span></span></Link>
       <p className="brand-caption">{clinicName}</p>
-      <nav className="sidebar-section" aria-label="Workspace">
+      <WorkspaceNavigation clinicName={clinicName} currentLabel={navigation[actor.role].find((item) => item.href === current)?.label ?? "Security"}><nav className="sidebar-section" aria-label="Workspace">
         <span className="eyebrow">Workspace</span>
         <div className="side-nav">{navigation[actor.role].map(({ href, label, icon: Icon }) =>
-          <Link key={href} href={href} data-active={current === href}><Icon />{label}</Link>)}
-          <Link href="/account/security" data-active={current === "/account/security"}><ShieldCheck />Security</Link></div>
-      </nav>
+          <Link key={href} href={href} data-active={current === href} aria-current={current === href ? "page" : undefined}><Icon />{label}</Link>)}
+          <Link href="/account/security" data-active={current === "/account/security"} aria-current={current === "/account/security" ? "page" : undefined}><ShieldCheck />Security</Link></div>
+      </nav></WorkspaceNavigation>
       <div className="sidebar-note">
         <div className="workspace-identity">
           <span className="workspace-icon"><ShieldCheck /></span>
@@ -41,7 +43,7 @@ export function AppShell({ actor, clinicName, current, breadcrumb, children, reg
       <header className="topbar">
         <nav className="breadcrumb" aria-label="Breadcrumb">{breadcrumb}</nav>
         <div className="topbar-actions">
-          <form action={signOutAction}><button className="shortcut-button" type="submit"><LogOut /><span>Sign out</span></button></form>
+          <form action={signOutAction}><button className="shortcut-button" type="submit" aria-label="Sign out"><LogOut aria-hidden="true" /><span>Sign out</span></button></form>
         </div>
       </header>
       <main className="main-content" id="main">{children}</main>
