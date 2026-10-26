@@ -1,41 +1,51 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, CalendarDays, Check, ChevronDown, ClipboardList, Fingerprint, HeartHandshake, Layers3, LockKeyhole, Menu, ShieldCheck, Sparkles, Users } from "lucide-react";
-import { Brand } from "@/components/public/brand";
-import { WorkspaceIllustration } from "@/components/public/workspace-illustration";
-import { MeridianMark } from "@/components/design/graphics";
+import { ArrowRight, ArrowUpRight, CalendarDays, Check, ChevronDown, ClipboardList, Fingerprint, HeartHandshake, LockKeyhole, ShieldCheck } from "lucide-react";
+import { SiteHeader } from "@/components/public/site-header";
+import { SiteFooter } from "@/components/public/site-footer";
+import { HealthNews } from "@/components/public/health-news";
+import { Testimonials } from "@/components/public/testimonials";
+import { WorkflowTour } from "@/components/public/workflow-tour";
 
-export const metadata: Metadata = { title: "Meridian — More room for care", description: "Meet Meridian, a considered clinic workspace bringing the patient journey into focus. Explore the experience and create your clinic workspace." };
+export const metadata: Metadata = { title: "Meridian — More room for care", description: "A connected clinic workspace for appointments, clinical notes, and patient follow-up. Explore Meridian with a guided sample visit." };
 
 const features = [
-  { icon: CalendarDays, number: "01", title: "A day that makes sense.", text: "A clear view of the clinic day, with appointments and patient arrival states easy to scan.", detail: "Scheduling & reception", className: "feature-schedule" },
-  { icon: ClipboardList, number: "02", title: "The context to care.", text: "A clinical workspace designed to bring the patient story, observations, and next steps together.", detail: "The clinical workspace", className: "feature-clinical" },
-  { icon: HeartHandshake, number: "03", title: "Clarity on both sides.", text: "A gentler patient experience with larger type, straightforward choices, and room to breathe.", detail: "The patient experience", className: "feature-patient" },
+  { icon: CalendarDays, number: "01", title: "A clearer clinic day.", text: "Bring appointments, arrivals, and the waiting room into one connected flow.", detail: "Scheduling & reception", image: "outpatient-consultation.webp", alt: "A physician discussing an outpatient visit with a patient", className: "feature-schedule" },
+  { icon: ClipboardList, number: "02", title: "Context for every visit.", text: "Keep patient context, observations, and clinical notes close to the work of care.", detail: "The clinical workspace", image: "clinical-documentation.webp", alt: "A clinician documenting a visit at a clinical workstation", className: "feature-clinical" },
+  { icon: HeartHandshake, number: "03", title: "A simpler patient journey.", text: "Give patients a clear way to book, review appointments, and read their visit summaries.", detail: "The patient experience", image: "medical-exam-room.webp", alt: "A bright examination room with modern outpatient equipment", className: "feature-patient" },
 ];
 
 export default function Home() {
-  return <div className="public-site">
-    <a className="skip-link" href="#main">Skip to content</a>
-    <header className="marketing-header"><div className="public-container marketing-nav"><Brand /><nav className="marketing-desktop-nav" aria-label="Main navigation"><a href="#platform">The platform</a><a href="#experience">The experience</a><a href="#security">Trust & access</a></nav><div className="marketing-nav-actions"><Link className="public-text-link" href="/sign-in">Sign in</Link><Link className="public-button public-button-small" href="/sign-up">Get started <ArrowUpRight /></Link><details className="marketing-mobile-menu"><summary aria-label="Open navigation"><Menu /></summary><nav aria-label="Mobile navigation"><a href="#platform">The platform</a><a href="#experience">The experience</a><a href="#security">Trust & access</a><Link href="/design">Explore the preview</Link></nav></details></div></div></header>
+  return <div className="public-site" id="top">
+    <a className="skip-link" href="#main">Skip to content</a><SiteHeader />
     <main id="main">
-      <section className="public-container marketing-hero">
-        <div className="marketing-hero-copy"><span className="marketing-pill"><span /> A fresh perspective on clinic software</span><h1>Less between you<br />and <span>better care.</span></h1><p>A considered workspace for the people who care.<br className="desktop-break" /> Bring your clinic day into focus, and make more room for the human side of healthcare.</p><div className="marketing-hero-actions"><Link href="/sign-up" className="public-button">Create your workspace <ArrowUpRight /></Link><Link href="/design" className="public-button public-button-outline">Explore the preview <ArrowRight /></Link></div><div className="marketing-hero-note"><span><Check /> Built around your clinic</span><span><Check /> Considered at every step</span></div></div>
-        <WorkspaceIllustration />
+      <section className="marketing-photo-hero">
+        <div className="photo-hero-media"><Image src="/images/meridian/hero-vitals.webp" alt="A clinician checking a patient’s blood pressure beside a modern vital-signs monitor" fill priority sizes="100vw" /></div>
+        <div className="public-container marketing-hero"><div className="marketing-hero-copy">
+          <Link href="#experience" className="marketing-pill"><span className="pill-tag">Preview</span> Walk through a clinic visit <ArrowRight aria-hidden="true" /></Link>
+          <h1>Less between you<br />and <span>better care.</span></h1>
+          <p>Manage appointments, clinical notes, and patient follow-up in one connected clinic workspace.</p>
+          <div className="marketing-hero-actions"><Link href="/sign-up" className="public-button">Create your workspace <ArrowUpRight aria-hidden="true" /></Link><Link href="#experience" className="public-button public-button-outline">Explore the preview <ArrowRight aria-hidden="true" /></Link></div>
+          <div className="marketing-hero-note"><span><Check aria-hidden="true" /> For clinic owners & teams</span><span><Check aria-hidden="true" /> Explore with sample data</span></div>
+        </div></div>
       </section>
-      <div className="marketing-principles"><div className="public-container"><p>Thoughtfully connected.<br /><strong>From arrival to aftercare.</strong></p><span><CalendarDays /> One clear schedule</span><span><Users /> One shared context</span><span><HeartHandshake /> A more human experience</span></div></div>
-      <section className="public-container marketing-section" id="platform">
-        <div className="marketing-section-heading"><div><span className="public-eyebrow">THE PLATFORM / BUILT AROUND PEOPLE</span><h2>Care has many moving parts.<br /><span>Your workspace shouldn’t.</span></h2></div><p>One connected direction for your clinic.<br />Thoughtful tools for the team. A clear path for the patient.</p></div>
-        <div className="marketing-features">{features.map(({ icon: Icon, ...feature }) => <article className={`marketing-feature ${feature.className}`} key={feature.number}><div className="feature-icon-row"><span className="feature-icon"><Icon /></span><span className="mono">{feature.number}</span></div><h3>{feature.title}</h3><p>{feature.text}</p><div className="feature-detail"><span>{feature.detail}</span><ArrowUpRight /></div></article>)}</div>
-        <p className="marketing-preview-note">Explore the interactive design preview. Clinical workflows are being developed.</p>
+      <section className="public-container marketing-section platform-overview" id="platform">
+        <div className="marketing-section-heading"><div><span className="public-eyebrow">ONE WORKSPACE. EVERY STEP.</span><h2>Built around your clinic day.</h2></div><p>Practical tools for your team.<br />A clear path for your patients.</p></div>
+        <div className="marketing-features">{features.map(({icon: Icon, ...feature}) => <article className={`marketing-feature photo-feature ${feature.className}`} key={feature.number}>
+          <div className="feature-photo"><Image src={`/images/meridian/${feature.image}`} alt={feature.alt} fill sizes="(max-width: 700px) 100vw, 33vw" /></div>
+          <div className="feature-copy"><div className="feature-icon-row"><span className="feature-icon"><Icon aria-hidden="true" /></span><span className="mono">{feature.number}</span></div><h3>{feature.title}</h3><p>{feature.text}</p><Link href="#experience" className="feature-detail"><span>{feature.detail}</span><ArrowUpRight aria-hidden="true" /></Link></div>
+        </article>)}</div>
       </section>
-      <section className="marketing-experience" id="experience"><div className="public-container marketing-experience-grid">
-        <div className="experience-art" aria-hidden="true"><div className="experience-orbits"><span /><span /><span /><MeridianMark /></div><div className="experience-label label-clinic"><Layers3 /><div><strong>For the team</strong><span>Precise. Focused. Connected.</span></div></div><div className="experience-label label-patient"><HeartHandshake /><div><strong>For the patient</strong><span>Calm. Clear. Reassuring.</span></div></div><span className="experience-caption mono">DIFFERENT NEEDS. SHARED CARE.</span></div>
-        <div className="experience-copy"><span className="public-eyebrow">THE EXPERIENCE / TWO PERSPECTIVES</span><h2>One platform.<br />A thoughtful view<br />for everyone.</h2><p>A clinician needs the right detail at a glance. A patient needs a clear next step. Meridian gives both the space and attention they deserve.</p><ul><li><Check /> A focused workspace for busy clinical teams</li><li><Check /> A calm, accessible experience for patients</li><li><Check /> Light and dark views, with keyboard-friendly controls</li></ul><Link href="/design" className="public-inline-link">Take a closer look <ArrowRight /></Link></div>
+      <WorkflowTour />
+      <section className="public-container marketing-section marketing-security" id="security"><div><span className="public-eyebrow">TRUST & ACCESS</span><h2>Careful access. Clear accountability.</h2><p>Controls designed around the people and responsibilities in your clinic.</p></div><div className="security-items"><article><Fingerprint aria-hidden="true" /><h3>An extra layer of assurance</h3><p>Authenticator verification for clinic team accounts, with recovery codes for when you need them.</p></article><article><LockKeyhole aria-hidden="true" /><h3>Access with a purpose</h3><p>Role and care-relationship controls shape what each person can access.</p></article><article><ShieldCheck aria-hidden="true" /><h3>A record of important actions</h3><p>Audit records help your clinic review sensitive actions with context.</p></article></div></section>
+      <Testimonials />
+      <HealthNews />
+      <section className="public-container marketing-faq" id="questions"><div><span className="public-eyebrow">A FEW HELPFUL DETAILS</span><h2>Before you begin.</h2></div><div className="marketing-questions">
+        <details><summary>What can I explore today?<ChevronDown aria-hidden="true" /></summary><p>Follow the sample visit above or explore the design library. Both use fictional data. The development workspace includes booking, clinical notes, and patient summaries; availability depends on your clinic’s configuration.</p></details>
+        <details><summary>Who is a workspace for?<ChevronDown aria-hidden="true" /></summary><p>A new workspace is for a clinic owner or administrator. Already part of a clinic? <Link href="/sign-in">Sign in to your existing account</Link> or ask your clinic for an invitation.</p></details>
+        <details><summary>Can I try the interface before creating an account?<ChevronDown aria-hidden="true" /></summary><p>Yes. <Link href="/design">Open the design preview</Link> to explore the interface with synthetic sample data. It does not book appointments or change medical records.</p></details>
       </div></section>
-      <section className="public-container marketing-section marketing-security" id="security"><div><span className="public-eyebrow">TRUST & ACCESS / PART OF THE FOUNDATION</span><h2>A little more peace of mind.</h2><p>Careful access starts with the way your workspace is built.</p></div><div className="security-items"><article><Fingerprint /><h3>An extra layer of assurance</h3><p>Authenticator verification for clinic team accounts, with recovery codes for when you need them.</p></article><article><LockKeyhole /><h3>Access with a purpose</h3><p>Role and care-relationship controls designed around the work each person needs to do.</p></article><article><ShieldCheck /><h3>A record of the important things</h3><p>Audit logging in the foundation, so sensitive actions can be reviewed with context.</p></article></div></section>
-      <section className="public-container marketing-faq"><div><span className="public-eyebrow">A FEW HELPFUL DETAILS</span><h2>Before you begin.</h2></div><div className="marketing-questions"><details><summary>What can I explore today?<ChevronDown /></summary><p>You can explore the interactive workspace preview, including clinical and patient views, and create a clinic workspace when account services are configured. The complete clinical workflow is still in development.</p></details><details><summary>Who is a workspace for?<ChevronDown /></summary><p>A new workspace is for a clinic owner or administrator. If you already belong to a clinic, use the sign-in page with your existing account. Public registration does not grant access to an existing clinic.</p></details><details><summary>Can I try the interface before creating an account?<ChevronDown /></summary><p>Yes. <Link href="/design">Open the design preview</Link> to explore the interface with synthetic sample data. It does not book appointments or change medical records.</p></details></div></section>
-      <section className="public-container marketing-cta"><div><span className="public-eyebrow"><Sparkles /> A LITTLE LESS FRICTION. A LITTLE MORE HUMAN.</span><h2>Make room for better care.</h2><p>Your next chapter starts with a clearer workspace.</p></div><Link href="/sign-up" className="public-button public-button-light">Create your workspace <ArrowUpRight /></Link><MeridianMark className="cta-watermark" /></section>
-    </main>
-    <footer className="public-container marketing-footer"><div><Brand /><p>Considered software. Connected care.</p></div><nav aria-label="Footer navigation"><Link href="/design">Explore the preview</Link><Link href="/sign-in">Sign in</Link><Link href="/sign-up">Create a workspace</Link></nav><span>© {new Date().getFullYear()} Meridian</span></footer>
+    </main><SiteFooter />
   </div>;
 }
