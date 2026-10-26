@@ -31,10 +31,7 @@ export function Schedule({ providers, templates, blackouts, timeZone }: { provid
   const weekly = mine.reduce((total, template) => total + slotCount(template), 0);
 
   return <>
-    <div className="provider-tabs" role="tablist" aria-label="Clinicians">
-      {providers.map((provider) => <button key={provider.id} role="tab" type="button" className="shortcut-button" aria-selected={provider.id === selected}
-        data-active={provider.id === selected} onClick={() => setSelected(provider.id)}>{provider.displayName}</button>)}
-    </div>
+    <div className="provider-picker"><Field label="Clinician" id="schedule-provider"><select id="schedule-provider" className="input" value={selected} onChange={(event) => setSelected(event.target.value)} disabled={!providers.length}>{!providers.length && <option value="">No clinicians available</option>}{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}</select></Field></div>
     {error ? <p className="field-error" role="alert" style={{ marginBottom: 14 }}>{error}</p> : null}
     {notice ? <p className="field-hint" role="status" style={{ marginBottom: 14 }}>{notice}</p> : null}
 
