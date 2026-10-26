@@ -43,15 +43,14 @@ export function Booking({ providerId, providerName, slots, timeZone }: { provide
       <Textarea id="reason" name="reason" rows={3} required minLength={3} maxLength={200} value={reason} onChange={(event) => setReason(event.target.value)} />
     </Field>
 
-    <div className="booking-times">
+    <div className="booking-times" role="radiogroup" aria-label="Available appointment times">
       <h3>Choose a time with {providerName}</h3>
       {taken ? <p className="booking-alert" role="alert"><TriangleAlert /> {state.error} Your reason has been kept.</p> : null}
       {!slots.length ? <p className="booking-empty"><CalendarX /> No times are open with this clinician in the next three weeks. Try another clinician.</p>
         : [...byDay.entries()].map(([day, daySlots]) => <div key={day} className="booking-day">
           <span className="eyebrow">{day}</span>
-          <div className="time-options" role="radiogroup" aria-label={`Times on ${day}`}>
-            {daySlots.map((slot) => <button key={slot.id} type="button" className="time-option" role="radio" aria-checked={slot.id === slotId} onClick={() => setSlotId(slot.id)}>
-              {timeFormat.format(new Date(slot.startsAt))}</button>)}
+          <div className="time-options">
+            {daySlots.map((slot) => <label key={slot.id} className="time-option" data-selected={slot.id === slotId}><input className="sr-only" type="radio" name="selectedTime" value={slot.id} checked={slot.id === slotId} onChange={() => setSlotId(slot.id)} aria-label={`${day} at ${timeFormat.format(new Date(slot.startsAt))}`} />{timeFormat.format(new Date(slot.startsAt))}</label>)}
           </div>
         </div>)}
     </div>
