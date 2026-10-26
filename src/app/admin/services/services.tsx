@@ -33,8 +33,8 @@ export function Services({ services, invoices, currency, timeZone, canManagePric
         <Input id="name" name="name" defaultValue={addState.values?.name} placeholder="Extended consultation" maxLength={120} required /></Field>
       <Field label={`Price (${currency})`} id="amountMajor" error={addState.errors?.amountMajor?.[0]}>
         <Input id="amountMajor" name="amountMajor" type="number" min="0" step="0.01" defaultValue={addState.values?.amountMajor} required className="mono" /></Field>
-      <div className="field service-default-field">
-        <span className="service-default-heading">Default</span>
+      <div className="field service-default-field" role="group" aria-labelledby="isDefault-heading">
+        <span id="isDefault-heading" className="service-default-heading">Default</span>
         <label className="service-default-option" htmlFor="isDefault"><input id="isDefault" name="isDefault" type="checkbox" aria-describedby="isDefault-hint" />Use as this clinic&rsquo;s default</label>
         <p id="isDefault-hint" className="field-hint">What a visit is charged when nothing was added.</p>
       </div>

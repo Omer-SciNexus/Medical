@@ -22,7 +22,7 @@ describe("authentication action boundary", () => {
     mock.register.mockResolvedValue({ kind: "enroll_mfa", challenge: "a".repeat(64), provisioningUri: "otpauth://totp/Meridian:test?secret=TESTSECRET&issuer=Meridian" });
     const result = await signUpAction(credentials, form({ displayName: " Test Owner ", clinicName: " Test Clinic ", email: " USER@EXAMPLE.TEST ", password, confirmPassword: password, role: "clinician", clinicId: "existing-clinic" }));
     expect(mock.register).toHaveBeenCalledWith({ displayName: "Test Owner", clinicName: "Test Clinic", email: "user@example.test", password, confirmPassword: password }, "public-web", "http://127.0.0.1:4000");
-    expect(result).toEqual({ step: "enroll_mfa", secret: "TESTSECRET" });
+    expect(result).toEqual({ step: "enroll_mfa", secret: "TESTSECRET", provisioningUri: "otpauth://totp/Meridian:test?secret=TESTSECRET&issuer=Meridian" });
     expect(mock.set).toHaveBeenCalledWith("meridian_challenge", "a".repeat(64), expect.objectContaining({ httpOnly: true, sameSite: "strict", maxAge: 300 }));
     expect(mock.setSession).not.toHaveBeenCalled();
   });
@@ -64,7 +64,7 @@ describe("authentication action boundary", () => {
     mock.accept.mockResolvedValue({ kind: "enroll_mfa", challenge: "b".repeat(64), provisioningUri: "otpauth://totp/Meridian:test?secret=TESTSECRET&issuer=Meridian" });
     const result = await acceptInviteAction(credentials, form({ token, password, confirmPassword: password, role: "admin", clinicId: "someone-elses-clinic", email: "forged@example.test" }));
     expect(mock.accept).toHaveBeenCalledWith({ token, password, confirmPassword: password }, "public-web");
-    expect(result).toEqual({ step: "enroll_mfa", secret: "TESTSECRET" });
+    expect(result).toEqual({ step: "enroll_mfa", secret: "TESTSECRET", provisioningUri: "otpauth://totp/Meridian:test?secret=TESTSECRET&issuer=Meridian" });
     expect(mock.setSession).not.toHaveBeenCalled();
   });
   it("rejects a malformed invitation token before calling account services", async () => {

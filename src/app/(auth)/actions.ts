@@ -22,7 +22,7 @@ async function acceptResult(result: BeginResult, recoveryCodes?: string[]): Prom
   }
   jar.set(CHALLENGE_COOKIE, result.challenge, { ...await authCookieOptions(), maxAge: 300 });
   // The challenge token never enters client state or a URL. The setup key is shown once for enrollment.
-  return result.kind === "enroll_mfa" ? { step: "enroll_mfa", secret: new URL(result.provisioningUri).searchParams.get("secret") ?? undefined } : { step: "verify_mfa" };
+  return result.kind === "enroll_mfa" ? { step: "enroll_mfa", secret: new URL(result.provisioningUri).searchParams.get("secret") ?? undefined, provisioningUri: result.provisioningUri } : { step: "verify_mfa" };
 }
 function failure(error: unknown, step: AuthFormState["step"]): AuthFormState {
   if (error instanceof z.ZodError) return { step, errors: z.flattenError(error).fieldErrors };

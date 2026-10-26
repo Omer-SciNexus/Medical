@@ -42,7 +42,7 @@ export default async function BookPage({ searchParams }: { searchParams: Promise
       </div>
 
       {confirmedAppointment ? <div className="booking-confirmed" role="status"><CheckCircle2 /><div>
-        <strong>Appointment confirmed</strong><p>{clinicalDate(confirmedAppointment.startsAt, new Date(), timeZone)} at {new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(confirmedAppointment.startsAt)} ({timeZone}) with {providers.find((candidate) => candidate.id === confirmedAppointment.providerId)?.displayName ?? "your clinician"}.</p><Link className="public-inline-link" href="/patient/appointments">Review your appointments</Link></div></div> : null}
+        <strong>Appointment confirmed</strong><p>{clinicalDate(confirmedAppointment.startsAt, new Date(), timeZone)} ({timeZone}) with {providers.find((candidate) => candidate.id === confirmedAppointment.providerId)?.displayName ?? "your clinician"}.</p><Link className="public-inline-link" href="/patient/appointments">Review your appointments</Link></div></div> : null}
 
       <section className="section">
         <div className="section-header"><div className="section-heading"><div>
