@@ -47,8 +47,8 @@ export function SiteHeader() {
           {navigation.map((item) => <a key={item.href} href={item.href}>{item.label}</a>)}
         </nav>
         <div className="site-nav-actions">
-          <Link href="/sign-in" className="site-sign-in">Sign in</Link>
-          <Link href="/sign-up" className="site-start">Get started <span><ArrowUpRight aria-hidden="true" /></span></Link>
+          <Link href="/sign-in" prefetch={false} className="site-sign-in">Sign in</Link>
+          <Link href="/sign-up" prefetch={false} className="site-start">Get started <span><ArrowUpRight aria-hidden="true" /></span></Link>
           <button ref={toggle} type="button" className="site-menu-toggle" aria-label={open ? "Close navigation" : "Open navigation"}
             aria-expanded={open} aria-controls="site-mobile-navigation" onClick={() => setOpen((current) => !current)}>
             {open ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
@@ -59,9 +59,9 @@ export function SiteHeader() {
         <span className="site-menu-label">EXPLORE MERIDIAN</span>
         {navigation.map((item, index) => <a key={item.href} href={item.href} onClick={() => setOpen(false)}><span className="site-menu-number" aria-hidden="true">0{index + 1}</span>{item.label}<ArrowUpRight aria-hidden="true" /></a>)}
         <div className="site-mobile-actions">
-          <Link href="/sign-in" onClick={() => setOpen(false)}>Sign in <ArrowUpRight aria-hidden="true" /></Link>
+          <Link href="/sign-in" prefetch={false} onClick={() => setOpen(false)}>Sign in <ArrowUpRight aria-hidden="true" /></Link>
           <Link href="/design" onClick={() => setOpen(false)}>Explore the preview <ArrowUpRight aria-hidden="true" /></Link>
-          <Link href="/sign-up" className="site-mobile-start" onClick={() => setOpen(false)}>Create a workspace <ArrowUpRight aria-hidden="true" /></Link>
+          <Link href="/sign-up" prefetch={false} className="site-mobile-start" onClick={() => setOpen(false)}>Create a workspace <ArrowUpRight aria-hidden="true" /></Link>
         </div>
       </nav>
     </div>

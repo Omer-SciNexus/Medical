@@ -28,7 +28,7 @@ export function Security({ email, verified, hasMfa, recoveryRemaining, canReissu
         <code aria-label="Authenticator setup key">{mfaState.secret}</code>
         <button type="button" aria-label={copied ? "Setup key copied" : "Copy setup key"} onClick={() => navigator.clipboard.writeText(mfaState.secret ?? "").then(() => setCopied(true), () => setCopied(false))}>{copied ? <Check /> : <Copy />}</button>
       </div>
-      <Link className="button button-primary" href="/sign-in" style={{ marginTop: 16 }}>Verify and sign in</Link>
+      <Link className="button button-primary" href="/sign-in" prefetch={false} style={{ marginTop: 16 }}>Verify and sign in</Link>
     </div>
   </div>;
 

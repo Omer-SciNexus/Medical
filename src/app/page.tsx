@@ -26,7 +26,7 @@ export default function Home() {
           <Link href="#experience" className="marketing-pill"><span className="pill-tag">Preview</span> Walk through a clinic visit <ArrowRight aria-hidden="true" /></Link>
           <h1>Less between you<br />and <span>better care.</span></h1>
           <p>Manage appointments, clinical notes, and patient follow-up in one connected clinic workspace.</p>
-          <div className="marketing-hero-actions"><Link href="/sign-up" className="public-button">Create your workspace <ArrowUpRight aria-hidden="true" /></Link><Link href="#experience" className="public-button public-button-outline">Explore the preview <ArrowRight aria-hidden="true" /></Link></div>
+          <div className="marketing-hero-actions"><Link href="/sign-up" prefetch={false} className="public-button">Create your workspace <ArrowUpRight aria-hidden="true" /></Link><Link href="#experience" className="public-button public-button-outline">Explore the preview <ArrowRight aria-hidden="true" /></Link></div>
           <div className="marketing-hero-note"><span><Check aria-hidden="true" /> For clinic owners & teams</span><span><Check aria-hidden="true" /> Explore with sample data</span></div>
         </div></div>
       </section>
@@ -43,7 +43,7 @@ export default function Home() {
       <HealthNews />
       <section className="public-container marketing-faq" id="questions"><div><span className="public-eyebrow">A FEW HELPFUL DETAILS</span><h2>Before you begin.</h2></div><div className="marketing-questions">
         <details><summary>What can I explore today?<ChevronDown aria-hidden="true" /></summary><p>Follow the sample visit above or explore the design library. Both use fictional data. The development workspace includes booking, clinical notes, and patient summaries; availability depends on your clinic’s configuration.</p></details>
-        <details><summary>Who is a workspace for?<ChevronDown aria-hidden="true" /></summary><p>A new workspace is for a clinic owner or administrator. Already part of a clinic? <Link href="/sign-in">Sign in to your existing account</Link> or ask your clinic for an invitation.</p></details>
+        <details><summary>Who is a workspace for?<ChevronDown aria-hidden="true" /></summary><p>A new workspace is for a clinic owner or administrator. Already part of a clinic? <Link href="/sign-in" prefetch={false}>Sign in to your existing account</Link> or ask your clinic for an invitation.</p></details>
         <details><summary>Can I try the interface before creating an account?<ChevronDown aria-hidden="true" /></summary><p>Yes. <Link href="/design">Open the design preview</Link> to explore the interface with synthetic sample data. It does not book appointments or change medical records.</p></details>
       </div></section>
     </main><SiteFooter />
