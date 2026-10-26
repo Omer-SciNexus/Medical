@@ -1,0 +1,24 @@
+{
+  "generator": "Built-in image_gen",
+  "created": "2026-10-25",
+  "direction": "Modern outpatient clinic care aligned with implemented visit, vital-sign and clinical-note workflows",
+  "assets": [
+    {
+      "file": "public/images/meridian/hero-vitals.webp",
+      "prompt": "Photorealistic premium outpatient healthcare photograph for a modern clinic-management website hero, landscape 3:2. A contemporary clinical assessment room with a sophisticated compact vital-signs monitor on a white wheeled medical stand prominently in the foreground at center-right, screen angled toward camera with a clean credible vital-signs display, small pulse trace and blood-pressure reading, no branding or patient identifiers. Behind the monitor a friendly female clinician in teal scrubs gently checks the blood-pressure cuff on the upper arm of a seated fully dressed adult patient. Relaxed routine outpatient checkup, not emergency care. Clinician, monitor and patient grouped around the center-right with generous margins for portrait cropping. White medical cabinetry, pale blue privacy glass, teal examination couch, bright natural daylight, immaculate modern medical equipment, crisp editorial detail and realistic skin and hands. Sophisticated, reassuring, clearly medical. No CT scanner, MRI, ultrasound, radiology, operating theatre, text overlay, logos, watermark or collage. Single photograph."
+    },
+    {
+      "file": "public/images/meridian/outpatient-consultation.webp",
+      "prompt": "Photorealistic editorial photograph for an outpatient clinic-management website, landscape 3:2 with both subjects centered for a near-square crop. In a bright modern clinical consultation room, a male physician in a white medical coat with a stethoscope around his neck sits facing an adult patient in a navy casual shirt, listening attentively while discussing the visit. Physician holds a simple tablet angled away with no visible screen or patient records; natural hands, warm professional expressions and eye contact. An examination couch and neatly mounted otoscope and blood-pressure equipment clearly visible in the background, white cabinets, soft daylight, muted teal and cool white palette, realistic contemporary general practice setting. Premium polished medical editorial photography, unmistakably healthcare, human and reassuring. No radiology screens, ultrasound, CT, MRI, spa furniture, text, logos, watermarks or collage. Single photograph."
+    },
+    {
+      "file": "public/images/meridian/clinical-documentation.webp",
+      "prompt": "Photorealistic premium healthcare editorial photograph, landscape 3:2. A female clinician in navy scrubs with a stethoscope around her neck documenting a completed outpatient visit at a clean desktop workstation in a modern clinic. Three-quarter side view, clinician on the left and single monitor on the right. The monitor shows a softly out-of-focus generic light clinical chart layout with a few teal section dividers and small vital-sign summary cards, deliberately no readable text, no patient data, no scans or x-rays. Her hands naturally on keyboard, realistic anatomy. White clinical cabinets and a blue examination couch in background, frosted daylight window, neat diagnostic instruments, refined blue-white-teal color palette, bright natural editorial lighting. Keep face and monitor inside central horizontal band for wide cropping. Clearly medical documentation and patient records, not radiology or research. No logos, watermark, readable writing, holograms or collage. Single photograph for a clinic software website."
+    },
+    {
+      "file": "public/images/meridian/medical-exam-room.webp",
+      "prompt": "Photorealistic architectural healthcare photograph, landscape 3:2. A beautiful brand-new fully equipped outpatient medical examination room, unmistakably clinical. Central electric examination couch with teal upholstery and white paper roll, wall-mounted diagnostic instruments, compact vital-sign monitor beside the couch, adjustable examination lamp, clean stainless medical trolley, neat closed white cabinetry with sink and hand hygiene dispenser. Bright white and soft sky-blue walls, a large frosted daylight window, organized clean surfaces, generous space, modern believable medical equipment, premium polished hospital design. Wide room composition, straight architectural verticals, crisp equipment details, soft daylight, fresh inviting professional atmosphere. No people, no spa furniture, no wood reception desk, no plants, no readable text, no logos or watermarks, no science-fiction machines. Single photograph."
+    }
+  ],
+  "scope": "Illustrative clinical environments; does not claim medical-device connectivity or radiology functionality. The product preview elsewhere on the homepage represents the software interface."
+}

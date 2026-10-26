@@ -4,6 +4,7 @@ import * as React from "react";
 import { useActionState } from "react";
 import { AlertTriangle, Ban, Check, FlaskConical, Loader2, Pill, Search, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { Badge, Button, Field, Input, Textarea } from "@/components/ui/primitives";
+import { ConfirmForm } from "@/components/ui/confirm-form";
 import { idleAction } from "@/lib/action-state";
 import { cancelPrescriptionAction, checkPrescriptionAction, draftPrescriptionAction, issuePrescriptionAction, searchMedicationsAction, type MedicationResult } from "@/app/clinical/actions";
 
@@ -133,8 +134,8 @@ export function Prescribe({ encounterId, open, provider, allergies, prescription
             </form>
             : <Button type="button" size="small" variant="danger" onClick={() => setOverriding(prescription.id)}><ShieldAlert />Override this warning</Button>) : null}
           {prescription.safetyStatus === "blocked" ? <span className="field-error">A hard stop cannot be issued. Cancel it and choose another medicine.</span> : null}
-          <form action={cancel}><input type="hidden" name="encounterId" value={encounterId} /><input type="hidden" name="prescriptionId" value={prescription.id} />
-            <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Cancel</Button></form>
+          <ConfirmForm action={cancel} title={`Cancel the draft for ${prescription.name} ${prescription.strength}?`} description="It will be marked cancelled and can no longer be issued. Start a new draft if the patient still needs this medicine." confirmLabel="Cancel draft"><input type="hidden" name="encounterId" value={encounterId} /><input type="hidden" name="prescriptionId" value={prescription.id} />
+            <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Cancel</Button></ConfirmForm>
         </div> : null}
       </li>)}</ul>}
       <div className="queue-footer"><span>Every draft, check, issue and cancellation is recorded against this patient with the prescribing purpose.</span></div>

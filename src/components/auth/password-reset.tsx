@@ -23,7 +23,7 @@ export function PasswordReset({ mode, configured, token }: { mode: "request" | "
     <h1>If that address has an account, a link is on its way.</h1>
     {/* Deliberately the same answer either way: who holds an account here is not public. */}
     <p className="auth-description">The link works once and expires in 30 minutes. Using it ends every signed-in session on the account, so sign in again afterwards.</p>
-    <p className="auth-switch"><Link href="/sign-in">Back to sign-in <ArrowRight /></Link></p>
+    <p className="auth-switch"><Link href="/sign-in" prefetch={false}>Back to sign-in <ArrowRight /></Link></p>
   </div>;
 
   if (state.done) return <div className="auth-content">
@@ -31,7 +31,7 @@ export function PasswordReset({ mode, configured, token }: { mode: "request" | "
     <span className="public-eyebrow">PASSWORD CHANGED</span>
     <h1>That&rsquo;s done.</h1>
     <p className="auth-description">Your new password is active and every previous session has been ended. Sign in with it now.</p>
-    <p className="auth-switch"><Link href="/sign-in">Sign in <ArrowRight /></Link></p>
+    <p className="auth-switch"><Link href="/sign-in" prefetch={false}>Sign in <ArrowRight /></Link></p>
   </div>;
 
   if (mode === "complete" && !token) return <div className="auth-content">
@@ -39,7 +39,7 @@ export function PasswordReset({ mode, configured, token }: { mode: "request" | "
     <span className="public-eyebrow">RESET LINK</span>
     <h1>This link cannot be used.</h1>
     <p className="auth-description">It may have expired, or already been used. Reset links work once and last 30 minutes.</p>
-    <p className="auth-switch"><Link href="/forgot-password">Request a new link <ArrowRight /></Link></p>
+    <p className="auth-switch"><Link href="/forgot-password" prefetch={false}>Request a new link <ArrowRight /></Link></p>
   </div>;
 
   return <div className="auth-content">
@@ -62,6 +62,6 @@ export function PasswordReset({ mode, configured, token }: { mode: "request" | "
       <button className="public-button auth-submit" type="submit" disabled={pending}>
         {pending ? <><LoaderCircle className="auth-spinner" /> Working…</> : <>{mode === "request" ? "Send the link" : "Set my new password"}<ArrowRight /></>}</button>
     </form>
-    <p className="auth-switch"><Link href="/sign-in">Back to sign-in <ArrowRight /></Link></p>
+    <p className="auth-switch"><Link href="/sign-in" prefetch={false}>Back to sign-in <ArrowRight /></Link></p>
   </div>;
 }

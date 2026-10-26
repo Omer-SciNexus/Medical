@@ -26,3 +26,11 @@ export function clinicalDate(value: Date | string, now = new Date(), timeZone = 
 export function money(amountMinor: number, currency: string, locale = "en-GB") {
   return new Intl.NumberFormat(locale, { style: "currency", currency, currencyDisplay: "code" }).format(amountMinor / 100);
 }
+
+const honorifics = new Set(["dr", "prof", "mr", "mrs", "ms", "mx"]);
+/** "Asel Yilmaz" → "Asel"; "Dr Asel Yilmaz" → "Dr Yilmaz", never a bare "Dr". */
+export function greetingName(name: string) {
+  const words = name.trim().split(/\s+/);
+  if (words.length > 1 && honorifics.has(words[0].replace(/\.$/, "").toLowerCase())) return `${words[0]} ${words[words.length - 1]}`;
+  return words[0];
+}

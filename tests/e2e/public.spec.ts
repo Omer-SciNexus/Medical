@@ -11,8 +11,10 @@ test("public homepage links to account creation, sign-in, and the existing previ
   await page.getByRole("link", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL("/sign-in");
   await page.getByRole("link", { name: "Back to home" }).click();
+  await expect(page).toHaveURL("/");
   await page.getByRole("link", { name: "Explore the preview", exact: true }).first().click();
-  await expect(page).toHaveURL("/design");
+  await expect(page).toHaveURL(/#experience$/);
+  await expect(page.getByRole("tablist", { name: "Sample visit stages" })).toBeVisible();
 });
 
 test("sign-in validates, preserves input, and gives an honest service status", async ({ page }) => {
@@ -96,6 +98,9 @@ test("dashboard requires a session and rejects a malformed cookie", async ({ pag
 });
 
 for (const route of ["/", "/sign-in", "/sign-up", "/forgot-password"]) test(`${route} accessibility and responsive layout`, async ({ page }) => {
+  // Entrance animations fade text in from transparent, and hydration can restart them, so a scan
+  // could measure half-faded colours no reader sees. Reduced motion renders the same resting colours.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(route);
   const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(result.violations).toEqual([]);
@@ -124,4 +129,25 @@ test("leaving the dark preview restores the public page theme", async ({ page })
   await page.getByRole("link", { name: "Meridian home", exact: true }).click();
   await expect(page).toHaveURL("/");
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", "dark");
+});
+
+
+test("sample visit supports keyboard navigation and labels illustrative testimonials honestly", async ({ page }) => {
+  await page.goto("/");
+  const stages = page.getByRole("tablist", { name: "Sample visit stages" });
+  await stages.getByRole("tab", { name: "01 Book" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(stages.getByRole("tab", { name: "02 Arrive" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("Ready for consultation", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Next sample stage" }).click();
+  await expect(page.getByText("Note ready for review", { exact: true })).toBeVisible();
+  await expect(page.locator("#testimonials")).toContainText("Fictional examples, not verified customer reviews");
+  await expect(page.locator("#news time[datetime='2026-10-23']")).toBeVisible();
+  await expect(page.locator("#news a[target='_blank']")).toHaveCount(3);
+});
+
+test("password recovery is directly accessible without opening help", async ({ page }) => {
+  await page.goto("/sign-in");
+  await page.getByRole("link", { name: "Forgot password?", exact: true }).click();
+  await expect(page).toHaveURL("/forgot-password");
 });

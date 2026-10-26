@@ -26,15 +26,18 @@ export function Services({ services, invoices, currency, timeZone, canManagePric
   return <>
     {error ? <p className="field-error" role="alert" style={{ marginBottom: 14 }}>{error}</p> : null}
     {canManagePrices ? <>
-    <form action={addService} className="admin-form schedule-form" aria-busy={addPending}>
+    <form action={addService} className="admin-form service-form" aria-busy={addPending}>
       <Field label="Code" id="code" error={addState.errors?.code?.[0]} hint="Capitals, digits and hyphens.">
         <Input id="code" name="code" defaultValue={addState.values?.code} placeholder="CONSULT-LONG" maxLength={20} required className="mono" /></Field>
       <Field label="Name" id="name" error={addState.errors?.name?.[0]}>
         <Input id="name" name="name" defaultValue={addState.values?.name} placeholder="Extended consultation" maxLength={120} required /></Field>
       <Field label={`Price (${currency})`} id="amountMajor" error={addState.errors?.amountMajor?.[0]}>
         <Input id="amountMajor" name="amountMajor" type="number" min="0" step="0.01" defaultValue={addState.values?.amountMajor} required className="mono" /></Field>
-      <Field label="Default" id="isDefault" hint="What a visit is charged when nothing was added.">
-        <label className="check-field"><input id="isDefault" name="isDefault" type="checkbox" /> Use as this clinic&rsquo;s default</label></Field>
+      <div className="field service-default-field" role="group" aria-labelledby="isDefault-heading">
+        <span id="isDefault-heading" className="service-default-heading">Default</span>
+        <label className="service-default-option" htmlFor="isDefault"><input id="isDefault" name="isDefault" type="checkbox" aria-describedby="isDefault-hint" />Use as this clinic&rsquo;s default</label>
+        <p id="isDefault-hint" className="field-hint">What a visit is charged when nothing was added.</p>
+      </div>
       <div className="admin-form-actions">
         <Button type="submit" disabled={pending}>{addPending ? <Loader2 /> : <Plus />}Add service</Button>
         <span className="field-hint">Prices are stored in integer minor units, so nothing rounds on the way to an invoice.</span>

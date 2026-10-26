@@ -4,6 +4,7 @@ import * as React from "react";
 import { useActionState } from "react";
 import { Check, Copy, KeyRound, Loader2, LogOut, MailPlus, Trash2, UserCheck, UserX } from "lucide-react";
 import { Badge, Button, Field, Input } from "@/components/ui/primitives";
+import { ConfirmForm } from "@/components/ui/confirm-form";
 import { idleAction, type ActionState } from "@/lib/action-state";
 import { invitePersonAction, resendInvitationAction, resetPersonMfaAction, revokeInvitationAction, revokePersonSessionsAction, setPersonActiveAction } from "@/app/admin/actions";
 
@@ -38,7 +39,7 @@ export function People({ people, invitations, self, mailConfigured }: { people: 
   const pending = invitePending || resendPending || revokePending || activePending || mfaPending || sessionPending;
 
   return <>
-    <form action={invite} className="admin-form" aria-busy={invitePending}>
+    <form action={invite} className="admin-form invitation-form" aria-busy={invitePending}>
       <Field label="Full name" id="displayName" error={inviteState.errors?.displayName?.[0]}>
         <Input id="displayName" name="displayName" defaultValue={inviteState.values?.displayName} placeholder="Dr Asel Yilmaz" maxLength={100} required /></Field>
       <Field label="Email address" id="email" error={inviteState.errors?.email?.[0]}>
@@ -68,13 +69,13 @@ export function People({ people, invitations, self, mailConfigured }: { people: 
             <td>{person.hasMfa ? <Badge tone="neutral">enrolled</Badge> : <Badge tone="high">not set up</Badge>}</td>
             <td>{person.active ? <Badge tone="accent">active</Badge> : <Badge tone="critical">deactivated</Badge>}</td>
             <td>{person.id === self ? <span className="field-hint">Your own account is managed elsewhere</span> : <div className="row-actions">
-              <form action={setActive}><input type="hidden" name="userId" value={person.id} /><input type="hidden" name="active" value={person.active ? "false" : "true"} />
+              <ConfirmForm action={setActive} title={`${person.active ? "Deactivate" : "Reactivate"} ${person.displayName}?`} description={person.active ? "This person will lose access and all their active sessions will end. Their records are retained." : "This person will be able to sign in to this clinic again."} confirmLabel={person.active ? "Deactivate account" : "Reactivate account"}><input type="hidden" name="userId" value={person.id} /><input type="hidden" name="active" value={person.active ? "false" : "true"} />
                 <Button type="submit" size="small" variant={person.active ? "danger" : "secondary"} disabled={pending}>
-                  {person.active ? <><UserX />Deactivate</> : <><UserCheck />Reactivate</>}</Button></form>
-              <form action={resetMfa}><input type="hidden" name="userId" value={person.id} />
-                <Button type="submit" size="small" variant="ghost" disabled={pending || !person.hasMfa}><KeyRound />Reset authenticator</Button></form>
-              <form action={revokeSessions}><input type="hidden" name="userId" value={person.id} />
-                <Button type="submit" size="small" variant="ghost" disabled={pending}><LogOut />End sessions</Button></form>
+                  {person.active ? <><UserX />Deactivate</> : <><UserCheck />Reactivate</>}</Button></ConfirmForm>
+              <ConfirmForm action={resetMfa} title={`Reset the authenticator for ${person.displayName}?`} description={"Their sessions will end and they will need to set up an authenticator again. Confirm their identity before continuing."} confirmLabel={"Reset authenticator"}><input type="hidden" name="userId" value={person.id} />
+                <Button type="submit" size="small" variant="ghost" disabled={pending || !person.hasMfa}><KeyRound />Reset authenticator</Button></ConfirmForm>
+              <ConfirmForm action={revokeSessions} title={`End all sessions for ${person.displayName}?`} description={"This person will be signed out on every device. They can sign in again with their existing credentials."} confirmLabel={"End sessions"}><input type="hidden" name="userId" value={person.id} />
+                <Button type="submit" size="small" variant="ghost" disabled={pending}><LogOut />End sessions</Button></ConfirmForm>
             </div>}</td>
           </tr>)}</tbody>
         </table>
@@ -101,8 +102,8 @@ export function People({ people, invitations, self, mailConfigured }: { people: 
                 <td>{state.label === "accepted" || state.label === "revoked" ? <span className="field-hint">—</span> : <div className="row-actions">
                   <form action={resend}><input type="hidden" name="invitationId" value={invitation.id} />
                     <Button type="submit" size="small" variant="secondary" disabled={pending}><MailPlus />New link</Button></form>
-                  <form action={revokeInvitation}><input type="hidden" name="invitationId" value={invitation.id} />
-                    <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Revoke</Button></form>
+                  <ConfirmForm action={revokeInvitation} title={`Revoke the invitation for ${invitation.displayName}?`} description={`The link sent to ${invitation.email} will stop working immediately. You can send a new invitation later.`} confirmLabel="Revoke invitation"><input type="hidden" name="invitationId" value={invitation.id} />
+                    <Button type="submit" size="small" variant="ghost" disabled={pending}><Trash2 />Revoke</Button></ConfirmForm>
                 </div>}</td>
               </tr>;
             })}</tbody>
