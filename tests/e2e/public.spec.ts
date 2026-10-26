@@ -98,9 +98,10 @@ test("dashboard requires a session and rejects a malformed cookie", async ({ pag
 });
 
 for (const route of ["/", "/sign-in", "/sign-up", "/forgot-password"]) test(`${route} accessibility and responsive layout`, async ({ page }) => {
+  // Entrance animations fade text in from transparent, and hydration can restart them, so a scan
+  // could measure half-faded colours no reader sees. Reduced motion renders the same resting colours.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(route);
-  // Entrance animations fade text in from transparent; scanning mid-fade measures colours no reader sees.
-  await page.evaluate(() => Promise.all(document.getAnimations().filter((animation) => animation.effect?.getTiming().iterations !== Infinity).map((animation) => animation.finished)).then(() => undefined));
   const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(result.violations).toEqual([]);
   for (const width of [1440, 768, 390, 360]) {
