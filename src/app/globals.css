@@ -823,6 +823,7 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 @media (prefers-reduced-motion: reduce) {
   .spin { animation: none !important; }
 }
+.provider-picker { max-width: 360px; margin-bottom: 22px; }
 .time-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
 .time-option[data-selected="true"] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 label.time-option { position: relative; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; min-height: 44px; }
