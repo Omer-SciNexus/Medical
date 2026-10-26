@@ -39,7 +39,7 @@ export function People({ people, invitations, self, mailConfigured }: { people: 
   const pending = invitePending || resendPending || revokePending || activePending || mfaPending || sessionPending;
 
   return <>
-    <form action={invite} className="admin-form" aria-busy={invitePending}>
+    <form action={invite} className="admin-form invitation-form" aria-busy={invitePending}>
       <Field label="Full name" id="displayName" error={inviteState.errors?.displayName?.[0]}>
         <Input id="displayName" name="displayName" defaultValue={inviteState.values?.displayName} placeholder="Dr Asel Yilmaz" maxLength={100} required /></Field>
       <Field label="Email address" id="email" error={inviteState.errors?.email?.[0]}>
