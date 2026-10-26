@@ -27,6 +27,7 @@ export default async function BookPage({ searchParams }: { searchParams: Promise
       getClinicSettings(actor), listCareProviders(actor), listMyAppointments(actor), listMyVisits(actor),
     ]);
     clinicName = clinic?.name ?? clinicName;
+    const confirmedAppointment = appointments.find((appointment) => appointment.id === confirmed && appointment.status === "booked" && appointment.startsAt.getTime() > Date.now());
     const provider = providers.find((candidate) => candidate.id === providerId) ?? null;
     const slots = provider ? await listProviderAvailability(actor, { providerId: provider.id, days: 21 }) : [];
     const upcoming = appointments.filter((appointment) => appointment.startsAt.getTime() > Date.now() && appointment.status !== "cancelled");
@@ -35,13 +36,13 @@ export default async function BookPage({ searchParams }: { searchParams: Promise
     return shell(<>
       <div className="patient-welcome">
         <span className="patient-welcome-label"><span className="patient-welcome-line" /> Your care</span>
-        <h1>{confirmed ? "Your appointment is booked." : "Book a visit."}</h1>
-        <p>{confirmed ? "We have saved your appointment and your clinician can see the reason you gave. You can review it below."
+        <h1>{confirmedAppointment ? "Your appointment is booked." : "Book a visit."}</h1>
+        <p>{confirmedAppointment ? "We have saved your appointment and your clinician can see the reason you gave. You can review it below."
           : "Choose a clinician, tell us what it is about, and pick a time that suits you. Nothing is booked until you confirm."}</p>
       </div>
 
-      {confirmed ? <div className="booking-confirmed" role="status"><CheckCircle2 /><div>
-        <strong>Appointment confirmed</strong><p>A reminder will be sent before your visit. You can book another below.</p></div></div> : null}
+      {confirmedAppointment ? <div className="booking-confirmed" role="status"><CheckCircle2 /><div>
+        <strong>Appointment confirmed</strong><p>{clinicalDate(confirmedAppointment.startsAt, new Date(), timeZone)} at {new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(confirmedAppointment.startsAt)} ({timeZone}) with {providers.find((candidate) => candidate.id === confirmedAppointment.providerId)?.displayName ?? "your clinician"}.</p><Link className="public-inline-link" href="/patient/appointments">Review your appointments</Link></div></div> : null}
 
       <section className="section">
         <div className="section-header"><div className="section-heading"><div>
@@ -50,7 +51,7 @@ export default async function BookPage({ searchParams }: { searchParams: Promise
           : <div className="provider-options">{providers.map((candidate) => <Link key={candidate.id} href={`/patient/book?providerId=${candidate.id}`}
             className="provider-option" data-selected={candidate.id === provider?.id}>
             <span className="provider-avatar"><UserRound /></span>
-            <span><strong>{candidate.displayName}</strong><small>General practice</small></span>
+            <span><strong>{candidate.displayName}</strong><small>Clinic clinician</small></span>
             {candidate.id === provider?.id ? <CheckCircle2 /> : <ChevronRight />}
           </Link>)}</div>}
       </section>
