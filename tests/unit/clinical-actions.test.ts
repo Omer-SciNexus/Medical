@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   sameOrigin: vi.fn(), requireActor: vi.fn(), startEncounter: vi.fn(), advanceAppointment: vi.fn(), getAppointmentForCare: vi.fn(), publish: vi.fn(),
 }));
-vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw new Error(`REDIRECT:${url}`); } }));
+vi.mock("next/navigation", () => ({
+  redirect: (url: string) => { throw new Error(`REDIRECT:${url}`); },
+  unstable_rethrow: (error: unknown) => { if (error instanceof Error && error.message.startsWith("REDIRECT:")) throw error; },
+}));
 vi.mock("@/platform/realtime", () => ({ publishChange: mock.publish }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/app/session", () => ({ requireActor: mock.requireActor }));
