@@ -1,4 +1,5 @@
 import "server-only";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { AccessDeniedError, PersonAdminError } from "@/modules/identity";
 import { SlotUnavailableError, StaleAppointmentError, ScheduleAuthoringError, PatientRegistrationError, AccessScopeError } from "@/modules/scheduling";
@@ -17,6 +18,9 @@ const speakable = (): [new (...args: never[]) => Error, ActionCode][] => [
   [EncounterStateError, "state"], [AccessScopeError, "state"], [PersonAdminError, "state"], [ScheduleAuthoringError, "state"], [PatientRegistrationError, "state"], [BillingError, "state"],
 ];
 export function toActionState(error: unknown, values?: Record<string, string>): ActionState {
+  // A redirect is control flow, not a failure: an expired session must still reach sign-in
+  // rather than surface as a generic error from inside the action's try block.
+  unstable_rethrow(error);
   if (error instanceof z.ZodError) return { ok: false, code: "invalid", errors: z.flattenError(error).fieldErrors, values };
   if (error instanceof AccessDeniedError) return { ok: false, code: "denied", error: "You do not have permission to do that.", values };
   const match = speakable().find(([candidate]) => error instanceof candidate);
