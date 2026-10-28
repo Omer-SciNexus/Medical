@@ -2,6 +2,9 @@
 
 :root {
   color-scheme: light;
+  /* Self-hosted from @fontsource (imported in the root layout), so builds never fetch fonts. */
+  --font-plex-sans: "IBM Plex Sans";
+  --font-plex-mono: "IBM Plex Mono";
   --ink-900: oklch(0.21 0.008 65);
   --ink-600: oklch(0.52 0.008 65);
   --ink-400: oklch(0.68 0.006 65);
