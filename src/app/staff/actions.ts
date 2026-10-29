@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { assertSameOrigin, invitePatientPortal, listPortalLinks } from "@/modules/identity";
-import { advanceAppointment, registerPatient, searchPatients } from "@/modules/scheduling";
+import { assertSameOrigin, invitePatientPortal, listPortalLinks, type Actor } from "@/modules/identity";
+import { advanceAppointment, correctPatient, getPatientDetails, PossibleDuplicateError, listPatients, registerPatient, searchPatients } from "@/modules/scheduling";
 import { patientAge } from "@/modules/clinical";
 import { publishChange } from "@/platform/realtime";
 import { requireActor } from "@/app/session";
@@ -16,31 +16,77 @@ const field = (form: FormData, name: string) => String(form.get(name) ?? "");
 export type PatientMatch = { id: string; givenName: string; surname: string; age: number; sex: string; mrn: string; portal: "none" | "invited" | "active" | "deactivated" };
 export type SearchResult = { ok: true; matches: PatientMatch[] } | { ok: false; error: string };
 
+export type PatientPage = { ok: true; patients: PatientMatch[]; page: number; pageSize: number; total: number } | { ok: false; error: string };
+
+type PatientRow = { id: string; givenName: string; surname: string; birthDate: string; sex: string; mrn: string };
+async function withPortal(actor: Actor, rows: PatientRow[]): Promise<PatientMatch[]> {
+  const links = await listPortalLinks(actor, rows.map((row) => row.id));
+  return rows.map((row) => {
+    const account = links.accounts.find((candidate) => candidate.patientId === row.id);
+    const invited = links.pending.some((candidate) => candidate.patientId === row.id);
+    return { id: row.id, givenName: row.givenName, surname: row.surname, age: patientAge(row.birthDate), sex: row.sex, mrn: row.mrn,
+      portal: account ? (account.active ? "active" : "deactivated") : invited ? "invited" : "none" };
+  });
+}
 export async function searchPatientsAction(term: string): Promise<SearchResult> {
   try {
     await assertSameOrigin();
     const actor = await requireActor(["staff", "admin"]);
-    const matches = await searchPatients(actor, { term });
-    const links = await listPortalLinks(actor, matches.map((match) => match.id));
-    return { ok: true, matches: matches.map((match) => {
-      const account = links.accounts.find((candidate) => candidate.patientId === match.id);
-      const invited = links.pending.some((candidate) => candidate.patientId === match.id);
-      return { id: match.id, givenName: match.givenName, surname: match.surname, age: patientAge(match.birthDate), sex: match.sex, mrn: match.mrn,
-        portal: account ? (account.active ? "active" : "deactivated") : invited ? "invited" : "none" };
-    }) };
+    return { ok: true, matches: await withPortal(actor, await searchPatients(actor, { term })) };
   } catch (error) {
     const state = toActionState(error);
     return { ok: false, error: state.error ?? "That search could not be run." };
   }
 }
-export async function registerPatientAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+export async function listPatientsAction(page: number): Promise<PatientPage> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    const result = await listPatients(actor, { page });
+    return { ok: true, patients: await withPortal(actor, result.patients), page: result.page, pageSize: result.pageSize, total: result.total };
+  } catch (error) {
+    const state = toActionState(error);
+    return { ok: false, error: state.error ?? "The patient list could not be read." };
+  }
+}
+/** Possible matches carry an age like a search result does; the date of birth is the one just typed. */
+export type DuplicateMatch = { id: string; givenName: string; surname: string; age: number; sex: string; mrn: string };
+export type RegisterState = ActionState & { duplicates?: DuplicateMatch[] };
+export async function registerPatientAction(_previous: RegisterState, form: FormData): Promise<RegisterState> {
   const values = { givenName: field(form, "givenName"), surname: field(form, "surname"), birthDate: field(form, "birthDate"), sex: field(form, "sex"), mrn: field(form, "mrn") };
   try {
     await assertSameOrigin();
     const actor = await requireActor(["staff", "admin"]);
-    const patient = await registerPatient(actor, values);
+    const patient = await registerPatient(actor, { ...values, confirmDistinct: field(form, "confirmDistinct") });
     revalidatePath(PATIENTS);
     return { ok: true, notice: `Registered with record number ${patient.mrn}.` };
+  } catch (error) {
+    if (error instanceof PossibleDuplicateError) return { ok: false, code: "conflict", values, error: error.message,
+      duplicates: error.matches.map((match) => ({ id: match.id, givenName: match.givenName, surname: match.surname, age: patientAge(match.birthDate), sex: match.sex, mrn: match.mrn })) };
+    return toActionState(error, values);
+  }
+}
+export type PatientDetails = { id: string; givenName: string; surname: string; birthDate: string; sex: string; mrn: string; version: string };
+export type DetailsResult = { ok: true; patient: PatientDetails } | { ok: false; error: string };
+export async function getPatientDetailsAction(patientId: string): Promise<DetailsResult> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    return { ok: true, patient: await getPatientDetails(actor, { patientId }) };
+  } catch (error) {
+    const state = toActionState(error);
+    return { ok: false, error: state.error ?? "That record could not be opened." };
+  }
+}
+const fieldLabels = { givenName: "given name", surname: "surname", birthDate: "date of birth", sex: "sex" } as const;
+export async function correctPatientAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const values = { patientId: field(form, "patientId"), version: field(form, "version"), givenName: field(form, "givenName"), surname: field(form, "surname"), birthDate: field(form, "birthDate"), sex: field(form, "sex") };
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    const { mrn, changed } = await correctPatient(actor, values);
+    revalidatePath(PATIENTS);
+    return { ok: true, notice: changed.length ? `Updated ${mrn}: ${changed.map((key) => fieldLabels[key]).join(", ")}.` : `Nothing changed on ${mrn}.` };
   } catch (error) { return toActionState(error, values); }
 }
 export async function invitePatientPortalAction(_previous: ActionState, form: FormData): Promise<ActionState> {

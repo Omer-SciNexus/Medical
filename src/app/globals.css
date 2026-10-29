@@ -248,6 +248,7 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field > label { font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-600); }
 .field-full { grid-column: 1 / -1; }
+.table-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .input { width: 100%; min-height: var(--control-height); padding: 7px 10px; border: 1px solid var(--input-line); border-radius: 6px; background: var(--paper); color: var(--ink-900); font-size: 12px; }
 .input::placeholder { color: var(--ink-600); }
 .input:disabled { opacity: 0.5; cursor: not-allowed; background: var(--surface); }

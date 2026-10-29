@@ -11,8 +11,8 @@ import { encryptSecret } from "../../src/modules/identity/crypto";
 import { AccessDeniedError, PersonAdminError, invitePatientPortal, listPortalLinks } from "../../src/modules/identity/service";
 import { acceptInvitation } from "../../src/modules/identity/auth";
 import { resolveSession } from "../../src/modules/identity/sessions";
-import { registerPatient, searchPatients, AccessScopeError } from "../../src/modules/scheduling/service";
-import { PatientRegistrationError } from "../../src/modules/scheduling/validators";
+import { registerPatient, searchPatients, listPatients, getPatientDetails, correctPatient, listRecentRegistrations, AccessScopeError } from "../../src/modules/scheduling/service";
+import { PatientRegistrationError, PossibleDuplicateError } from "../../src/modules/scheduling/validators";
 import { listMyAppointments } from "../../src/modules/scheduling/service";
 import type { Actor } from "../../src/modules/identity/validators";
 
@@ -23,6 +23,7 @@ const origin = "http://127.0.0.1:4000";
 const portalPassword = "a memorable portal passphrase";
 const tokenOf = (link: string) => new URL(link).searchParams.get("token") ?? "";
 const staff = (overrides: Partial<Actor> = {}): Actor => ({ id: seedIds.staff, clinicId: seedIds.clinic, role: "staff", patientId: null, mfaVerified: true, authenticatedAt: Date.now(), mfaVerifiedAt: Date.now(), ...overrides });
+const admin = (): Actor => ({ id: seedIds.admin, clinicId: seedIds.clinic, role: "admin", patientId: null, mfaVerified: true, authenticatedAt: Date.now(), mfaVerifiedAt: Date.now() });
 const clinician = (): Actor => ({ id: seedIds.clinician, clinicId: seedIds.clinic, role: "clinician", patientId: null, mfaVerified: true, authenticatedAt: Date.now(), mfaVerifiedAt: Date.now() });
 const newPatient = (surname: string) => ({ givenName: "Yeni", surname, birthDate: "1991-04-17", sex: "female" as const });
 
@@ -100,6 +101,102 @@ describe("registering a patient", () => {
     const again = await searchPatients(staff(), { term: "yenikayit" });
     expect(again.every((match) => match.surname === "Yenikayit")).toBe(true);
     expect(again).toHaveLength(byName.length);
+  });
+});
+
+describe("browsing every patient", () => {
+  it("pages through the clinic's patients by surname, counts them all, and records each page read", async () => {
+    const first = await listPatients(staff(), {});
+    expect(first.page).toBe(1);
+    const count = await owner.query("SELECT count(*)::int AS count FROM patients WHERE clinic_id = $1 AND deleted_at IS NULL", [seedIds.clinic]);
+    expect(first.total).toBe(count.rows[0].count);
+    expect(first.patients.length).toBe(Math.min(first.pageSize, first.total));
+    // Ordered as the database collates names, not as JavaScript would sort them.
+    const ordered = await owner.query("SELECT id FROM patients WHERE clinic_id = $1 AND deleted_at IS NULL ORDER BY surname, given_name, id LIMIT $2", [seedIds.clinic, first.pageSize]);
+    expect(first.patients.map((patient) => patient.id)).toEqual(ordered.rows.map((row) => row.id));
+    // Another clinic's patients are neither listed nor counted.
+    const other = await owner.query("SELECT id FROM patients WHERE clinic_id <> $1", [seedIds.clinic]);
+    const seen = new Set(first.patients.map((patient) => patient.id));
+    expect(other.rows.some((row) => seen.has(row.id))).toBe(false);
+    const beyond = await listPatients(admin(), { page: Math.ceil(first.total / first.pageSize) + 1 });
+    expect(beyond.patients).toHaveLength(0);
+    expect(beyond.total).toBe(first.total);
+    await expect(listPatients(staff(), { page: 0 })).rejects.toThrow();
+    await expect(listPatients(clinician(), {})).rejects.toBeInstanceOf(AccessScopeError);
+    await expect(listPatients(staff({ mfaVerified: false }), {})).rejects.toBeInstanceOf(AccessScopeError);
+    const audit = await owner.query("SELECT count(*)::int AS count FROM audit_log WHERE action = 'scheduling.patient_list' AND actor_id = $1", [seedIds.staff]);
+    expect(audit.rows[0].count).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("a likely duplicate", () => {
+  it("stops a second record with the same names and date of birth until the front desk confirms", async () => {
+    const first = await registerPatient(staff(), { givenName: "Elif", surname: "Ikizler", birthDate: "1990-06-01", sex: "female" });
+    const attempt = registerPatient(staff(), { givenName: "ELIF ", surname: "ikizler", birthDate: "1990-06-01", sex: "female" });
+    await expect(attempt).rejects.toBeInstanceOf(PossibleDuplicateError);
+    const error = await attempt.then(() => null, (caught: unknown) => caught);
+    if (!(error instanceof PossibleDuplicateError)) throw new Error("Expected the likely duplicate to be shown.");
+    expect(error.matches.map((match) => match.id)).toEqual([first.id]);
+    // Names typed into the wrong boxes are the same person too.
+    await expect(registerPatient(staff(), { givenName: "Ikizler", surname: "Elif", birthDate: "1990-06-01", sex: "female" })).rejects.toBeInstanceOf(PossibleDuplicateError);
+    const count = await owner.query("SELECT count(*)::int AS count FROM patients WHERE lower(surname) IN ('ikizler', 'elif')");
+    expect(count.rows[0].count).toBe(1);
+    // Showing the matches is a patient read, so it is recorded.
+    const shown = await owner.query("SELECT count(*)::int AS count FROM audit_log WHERE action = 'scheduling.duplicate_check' AND actor_id = $1", [seedIds.staff]);
+    expect(shown.rows[0].count).toBeGreaterThanOrEqual(2);
+  });
+  it("registers a different person with the same details once confirmed, and records that it was", async () => {
+    const twin = await registerPatient(staff(), { givenName: "Elif", surname: "Ikizler", birthDate: "1990-06-01", sex: "female", confirmDistinct: "yes" });
+    const audit = await owner.query("SELECT reason FROM audit_log WHERE action = 'scheduling.patient_registered' AND patient_id = $1", [twin.id]);
+    expect(audit.rows[0].reason).toBe("confirmed_distinct");
+  });
+  it("lets a different date of birth through without asking", async () => {
+    await expect(registerPatient(staff(), { givenName: "Elif", surname: "Ikizler", birthDate: "1990-06-02", sex: "female" })).resolves.toMatchObject({ mrn: expect.stringMatching(/^MR-/) });
+  });
+});
+
+describe("correcting a registration", () => {
+  it("corrects the details, keeps the record number, and records only which fields changed", async () => {
+    const created = await registerPatient(staff(), { givenName: "Mehmett", surname: "Duzeltme", birthDate: "1975-03-04", sex: "male" });
+    const opened = await getPatientDetails(staff(), { patientId: created.id });
+    expect(opened).toMatchObject({ givenName: "Mehmett", birthDate: "1975-03-04", mrn: created.mrn });
+    const result = await correctPatient(staff(), { patientId: created.id, version: opened.version, givenName: "Mehmet", surname: "Duzeltme", birthDate: "1975-04-03", sex: "male" });
+    expect(result).toEqual({ mrn: created.mrn, changed: ["givenName", "birthDate"] });
+    const row = await owner.query("SELECT given_name, birth_date::text AS birth_date, mrn, created_by, updated_by FROM patients WHERE id = $1", [created.id]);
+    expect(row.rows[0]).toMatchObject({ given_name: "Mehmet", birth_date: "1975-04-03", mrn: created.mrn, created_by: seedIds.staff, updated_by: seedIds.staff });
+    const audit = await owner.query("SELECT reason FROM audit_log WHERE action = 'scheduling.patient_corrected' AND patient_id = $1", [created.id]);
+    expect(audit.rows.map((entry) => entry.reason)).toEqual(["givenName,birthDate"]);
+    const read = await owner.query("SELECT count(*)::int AS count FROM audit_log WHERE action = 'scheduling.patient_details_read' AND patient_id = $1", [created.id]);
+    expect(read.rows[0].count).toBe(1);
+  });
+  it("refuses to overwrite a correction made since the form was opened", async () => {
+    const created = await registerPatient(staff(), { givenName: "Ayse", surname: "Eszamanli", birthDate: "1988-08-08", sex: "female" });
+    const opened = await getPatientDetails(staff(), { patientId: created.id });
+    await correctPatient(admin(), { patientId: created.id, version: opened.version, givenName: "Ayşe", surname: "Eszamanli", birthDate: "1988-08-08", sex: "female" });
+    await expect(correctPatient(staff(), { patientId: created.id, version: opened.version, givenName: "Ayse", surname: "Eşzamanlı", birthDate: "1988-08-08", sex: "female" })).rejects.toBeInstanceOf(PatientRegistrationError);
+    const row = await owner.query("SELECT given_name, surname FROM patients WHERE id = $1", [created.id]);
+    expect(row.rows[0]).toEqual({ given_name: "Ayşe", surname: "Eszamanli" });
+  });
+  it("changes nothing when nothing differs, and is closed to a clinician", async () => {
+    const created = await registerPatient(staff(), { givenName: "Ayni", surname: "Kalan", birthDate: "1966-06-06", sex: "unknown" });
+    const opened = await getPatientDetails(staff(), { patientId: created.id });
+    await expect(correctPatient(staff(), { patientId: created.id, version: opened.version, givenName: "Ayni", surname: "Kalan", birthDate: "1966-06-06", sex: "unknown" })).resolves.toEqual({ mrn: created.mrn, changed: [] });
+    await expect(getPatientDetails(clinician(), { patientId: created.id })).rejects.toBeInstanceOf(AccessScopeError);
+    await expect(correctPatient(clinician(), { patientId: created.id, version: opened.version, givenName: "X", surname: "Kalan", birthDate: "1966-06-06", sex: "unknown" })).rejects.toBeInstanceOf(AccessScopeError);
+    await expect(correctPatient(staff(), { patientId: created.id, version: opened.version, givenName: "Ayni", surname: "Kalan", birthDate: "2099-01-01", sex: "unknown" })).rejects.toBeInstanceOf(PatientRegistrationError);
+  });
+});
+
+describe("reviewing recent registrations", () => {
+  it("shows an administrator who registered whom and what was corrected, and nobody else", async () => {
+    const created = await registerPatient(staff(), { givenName: "Gozden", surname: "Gecirilen", birthDate: "1999-09-09", sex: "female" });
+    const review = await listRecentRegistrations(admin());
+    const entry = review.registrations.find((row) => row.id === created.id);
+    expect(entry).toMatchObject({ mrn: created.mrn, createdBy: seedIds.staff, corrected: false });
+    expect(review.registrations.find((row) => row.surname === "Duzeltme")).toMatchObject({ corrected: true, updatedBy: seedIds.staff });
+    await expect(listRecentRegistrations(staff())).rejects.toBeInstanceOf(AccessScopeError);
+    const audit = await owner.query("SELECT count(*)::int AS count FROM audit_log WHERE action = 'scheduling.registrations_reviewed' AND actor_id = $1", [seedIds.admin]);
+    expect(audit.rows[0].count).toBe(1);
   });
 });
 

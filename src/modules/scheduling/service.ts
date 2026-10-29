@@ -5,9 +5,9 @@ import { auditedPatientOperation } from "@/modules/identity";
 import { getDb, type Transaction } from "@/platform/db";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { addClinicDays, clinicDayRange, clinicTimezone, todayInZone, weekdayOf, zonedInstant, zonedStartOfDay } from "@/lib/clinic-day";
-import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientRegistrationSchema, patientSearchSchema, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
+import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
-import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findPatientIdentity, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
+import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
 // here would recurse. It returns only scope membership and is not a Server Action.
@@ -117,11 +117,21 @@ const MRN_PREFIX = "MR-";
  */
 export async function registerPatient(actor: Actor, input: unknown) {
   requireFrontDesk(actor);
-  const details = patientRegistrationSchema.parse(input);
-  if (details.birthDate > todayInZone((await getClinicSettings(actor))?.timezone ?? clinicTimezone())) throw new PatientRegistrationError("A date of birth cannot be in the future.");
+  const { confirmDistinct, ...details } = patientRegistrationSchema.parse(input);
+  await refuseFutureBirth(actor, details.birthDate);
+  // A second record for one person splits their history, so a likely match must be looked at
+  // before anything is created. Showing the matches is a patient read, and is recorded as one.
+  if (!confirmDistinct) {
+    const matches = await findNameAndBirthMatches(actor.clinicId, details);
+    if (matches.length) {
+      await recordScopedEvent(actor, { action: "scheduling.duplicate_check", purpose: "scheduling", reason: `${matches.length}` });
+      throw new PossibleDuplicateError(matches);
+    }
+  }
+  const reason = confirmDistinct ? "confirmed_distinct" : undefined;
   if (details.mrn) {
     try {
-      return await recordPatient(actor, { ...details, mrn: details.mrn });
+      return await recordPatient(actor, { ...details, mrn: details.mrn }, reason);
     } catch (error) {
       if (isUniqueViolation(error)) throw new PatientRegistrationError("That medical record number is already used in this clinic.");
       throw error;
@@ -132,17 +142,57 @@ export async function registerPatient(actor: Actor, input: unknown) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const next = await highestMrnNumber(actor.clinicId, MRN_PREFIX) + 1;
     try {
-      return await recordPatient(actor, { ...details, mrn: `${MRN_PREFIX}${next}` });
+      return await recordPatient(actor, { ...details, mrn: `${MRN_PREFIX}${next}` }, reason);
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
     }
   }
   throw new PatientRegistrationError("The clinic's record numbers are busy right now. Try again.");
 }
-async function recordPatient(actor: Actor, input: { givenName: string; surname: string; birthDate: string; sex: string; mrn: string }) {
+async function recordPatient(actor: Actor, input: { givenName: string; surname: string; birthDate: string; sex: string; mrn: string }, reason?: string) {
   const patient = await insertPatient(actor, input);
-  await recordScopedEvent(actor, { action: "scheduling.patient_registered", purpose: "scheduling", patientId: patient.id, resourceId: patient.id });
+  await recordScopedEvent(actor, { action: "scheduling.patient_registered", purpose: "scheduling", patientId: patient.id, resourceId: patient.id, reason });
   return patient;
+}
+async function refuseFutureBirth(actor: Actor, birthDate: string) {
+  if (birthDate > todayInZone((await getClinicSettings(actor))?.timezone ?? clinicTimezone())) throw new PatientRegistrationError("A date of birth cannot be in the future.");
+}
+/** The full registration details, date of birth included, for correcting them. Recorded as a read. */
+export async function getPatientDetails(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { patientId } = patientIdSchema.parse(input);
+  const patient = await findPatientDetails(actor.clinicId, patientId);
+  if (!patient) throw new PatientRegistrationError("That patient could not be found in this clinic.");
+  await recordScopedEvent(actor, { action: "scheduling.patient_details_read", purpose: "scheduling", patientId, resourceId: patientId });
+  return patient;
+}
+const correctable = ["givenName", "surname", "birthDate", "sex"] as const;
+/**
+ * Corrects what the front desk typed. The record number stays: it is what paper and other
+ * systems already point at. The log keeps which fields changed, never their old or new values.
+ */
+export async function correctPatient(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { patientId, version, ...details } = patientCorrectionSchema.parse(input);
+  await refuseFutureBirth(actor, details.birthDate);
+  const current = await findPatientDetails(actor.clinicId, patientId);
+  if (!current) throw new PatientRegistrationError("That patient could not be found in this clinic.");
+  const stale = new PatientRegistrationError("Someone changed this record while you had it open. Close it and open it again to see the current details.");
+  if (current.version !== version) throw stale;
+  const changed = correctable.filter((key) => current[key] !== details[key]);
+  if (!changed.length) return { mrn: current.mrn, changed };
+  const updated = await updatePatientDetails(actor, patientId, version, details);
+  if (!updated) throw stale;
+  await recordScopedEvent(actor, { action: "scheduling.patient_corrected", purpose: "scheduling", patientId, resourceId: patientId, reason: changed.join(",") });
+  return { mrn: updated.mrn, changed };
+}
+const REVIEW_DAYS = 14;
+/** What an administrator reviews after the fact, in place of approving each registration first. */
+export async function listRecentRegistrations(actor: Actor) {
+  requireScheduleAdmin(actor);
+  const rows = await listRegistrationsSince(actor.clinicId, new Date(Date.now() - REVIEW_DAYS * 86_400_000));
+  await recordScopedEvent(actor, { action: "scheduling.registrations_reviewed", purpose: "administration", reason: `${rows.length}` });
+  return { days: REVIEW_DAYS, registrations: rows };
 }
 /** Searching is a patient read across the clinic, so the search itself is recorded. */
 export async function searchPatients(actor: Actor, input: unknown) {
@@ -151,6 +201,15 @@ export async function searchPatients(actor: Actor, input: unknown) {
   const matches = await searchPatientsByTerm(actor.clinicId, term);
   await recordScopedEvent(actor, { action: "scheduling.patient_search", purpose: "scheduling", reason: `${matches.length}` });
   return matches;
+}
+const PATIENT_PAGE_SIZE = 25;
+/** Browsing reads names across the clinic just as a search does, so each page viewed is recorded. */
+export async function listPatients(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { page } = patientListSchema.parse(input);
+  const { rows, total } = await listPatientsPage(actor.clinicId, page, PATIENT_PAGE_SIZE);
+  await recordScopedEvent(actor, { action: "scheduling.patient_list", purpose: "scheduling", reason: `page ${page}: ${rows.length}` });
+  return { patients: rows, page, pageSize: PATIENT_PAGE_SIZE, total };
 }
 // Schedule authoring is an administrative act on clinic property, not on patient data, so it
 // is recorded as a clinic-scoped event rather than through patient authorization.

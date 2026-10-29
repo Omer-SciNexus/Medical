@@ -39,18 +39,31 @@ export const blackoutSchema = z.object({
 });
 export const blackoutIdSchema = z.object({ blackoutId: z.uuid() });
 
-export const patientRegistrationSchema = z.object({
+const patientDetailsSchema = z.object({
   givenName: z.string().trim().min(1, "Enter their given name.").max(80),
   surname: z.string().trim().min(1, "Enter their surname.").max(80),
   birthDate: clinicDay,
   sex: z.enum(["female", "male", "intersex", "unknown"], { error: "Choose how to record sex." }),
+});
+export const patientRegistrationSchema = patientDetailsSchema.extend({
   // Left empty, the clinic's next number is assigned; the unique index is the authority.
   mrn: z.string().trim().max(32).optional().transform((value) => value || undefined),
+  // Set only after the front desk has seen the possible matches and said this is someone else.
+  confirmDistinct: z.union([z.boolean(), z.string()]).optional().transform((value) => value === true || value === "yes"),
 });
+// The version is the record's updated_at in microseconds, so a stale form cannot overwrite a newer correction.
+export const patientCorrectionSchema = patientDetailsSchema.extend({ patientId: z.uuid(), version: z.string().regex(/^\d{1,20}$/) });
+export const patientIdSchema = z.object({ patientId: z.uuid() });
 export const patientSearchSchema = z.object({ term: z.string().trim().min(2, "Enter at least two characters.").max(80) });
+export const patientListSchema = z.object({ page: z.coerce.number().int().min(1).max(10_000).default(1) });
 
 export class PatientRegistrationError extends Error {
   constructor(message: string) { super(message); this.name = "PatientRegistrationError"; }
+}
+export type PossibleDuplicate = { id: string; givenName: string; surname: string; birthDate: string; sex: string; mrn: string };
+/** Not a failure: the registration waits until the front desk confirms this is someone else. */
+export class PossibleDuplicateError extends Error {
+  constructor(readonly matches: PossibleDuplicate[]) { super("A patient with this name and date of birth is already registered."); this.name = "PossibleDuplicateError"; }
 }
 export class ScheduleAuthoringError extends Error {
   constructor(message: string) { super(message); this.name = "ScheduleAuthoringError"; }
