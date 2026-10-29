@@ -2,31 +2,46 @@
 
 import * as React from "react";
 import { useActionState } from "react";
-import { Check, Copy, Loader2, Mail, Search, UserRoundPlus } from "lucide-react";
+import { Check, Copy, Loader2, Mail, Pencil, Search, UserRoundPlus } from "lucide-react";
 import { Badge, Button, Field, Input } from "@/components/ui/primitives";
 import { clinicalName } from "@/lib/format";
 import { idleAction } from "@/lib/action-state";
-import { invitePatientPortalAction, registerPatientAction, searchPatientsAction, type PatientMatch, type SearchResult } from "@/app/staff/actions";
+import { invitePatientPortalAction, registerPatientAction, searchPatientsAction, type PatientMatch, type RegisterState, type SearchResult } from "@/app/staff/actions";
+import { PatientCorrection } from "./correction";
 
 const portalTone = { none: "neutral", invited: "high", active: "accent", deactivated: "critical" } as const;
 const portalLabel = { none: "no account", invited: "link sent", active: "portal account", deactivated: "deactivated" } as const;
 
-export function Patients({ mailConfigured }: { mailConfigured: boolean }) {
+export type RecentRegistration = { id: string; givenName: string; surname: string; age: number; sex: string; mrn: string; registeredBy: string; registeredAt: string; correctedBy: string | null };
+type Review = { days: number; registrations: RecentRegistration[] } | null | undefined;
+
+export function Patients({ mailConfigured, review }: { mailConfigured: boolean; review?: Review }) {
   const [term, setTerm] = React.useState("");
   const [result, setResult] = React.useState<SearchResult | null>(null);
   const [searching, setSearching] = React.useState(false);
   const [inviting, setInviting] = React.useState<PatientMatch | null>(null);
-  const [registerState, register, registerPending] = useActionState(registerPatientAction, idleAction);
+  const [editing, setEditing] = React.useState<string | null>(null);
+  const [corrected, setCorrected] = React.useState<string | null>(null);
+  const [registerState, register, registerPending] = useActionState<RegisterState, FormData>(registerPatientAction, idleAction);
   const [inviteState, invite, invitePending] = useActionState(invitePatientPortalAction, idleAction);
   const [copied, setCopied] = React.useState(false);
 
+  async function search(value: string) {
+    setSearching(true);
+    setResult(await searchPatientsAction(value));
+    setSearching(false);
+  }
   async function runSearch(event: React.FormEvent) {
     event.preventDefault();
     if (term.trim().length < 2) return;
-    setSearching(true);
-    setResult(await searchPatientsAction(term));
-    setSearching(false);
+    await search(term);
   }
+  function edit(patientId: string) { setInviting(null); setCorrected(null); setEditing(patientId); }
+  // Saving closes the form; a visible search is re-run so it shows the corrected details.
+  const saved = React.useCallback((notice: string) => {
+    setEditing(null); setCorrected(notice);
+    if (result?.ok && term.trim().length >= 2) void search(term);
+  }, [result, term]);
   React.useEffect(() => { setCopied(false); }, [inviteState.link]);
   // A successful invitation closes the form but keeps the link on screen to copy.
   React.useEffect(() => { if (inviteState.link) setInviting(null); }, [inviteState.link]);
@@ -48,8 +63,28 @@ export function Patients({ mailConfigured }: { mailConfigured: boolean }) {
       <div className="admin-form-actions">
         <Button type="submit" disabled={registerPending}>{registerPending ? <Loader2 /> : <UserRoundPlus />}Register patient</Button>
         {registerState.notice ? <span className="field-hint" role="status">{registerState.notice}</span> : null}
-        {registerState.error ? <span className="field-error" role="alert">{registerState.error}</span> : null}
+        {registerState.error && !registerState.duplicates ? <span className="field-error" role="alert">{registerState.error}</span> : null}
       </div>
+      {registerState.duplicates?.length ? <div className="specimen field-full" role="alert">
+        <div className="specimen-topline"><strong>Is this the same person?</strong><span>{registerState.duplicates.length === 1 ? "1 record" : `${registerState.duplicates.length} records`} with this name and date of birth</span></div>
+        <div className="table-scroll">
+          <table className="clinical-table">
+            <caption className="sr-only">Existing patients with the same name and date of birth</caption>
+            <thead><tr><th scope="col">Patient</th><th scope="col">Record number</th><th scope="col">Age</th><th scope="col">Sex</th><th scope="col">Actions</th></tr></thead>
+            <tbody>{registerState.duplicates.map((match) => <tr key={match.id}>
+              <td>{clinicalName(match.givenName, match.surname)}</td>
+              <td className="mono">{match.mrn}</td>
+              <td className="numeric">{match.age}</td>
+              <td>{match.sex}</td>
+              <td><Button type="button" size="small" variant="ghost" onClick={() => edit(match.id)}><Pencil />Open this record</Button></td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+        <div className="queue-footer">
+          <span>If it is the same person, use the existing record instead of creating a second one.</span>
+          <Button type="submit" name="confirmDistinct" value="yes" size="small" variant="secondary" disabled={registerPending}><UserRoundPlus />Different person, register anyway</Button>
+        </div>
+      </div> : null}
     </form>
 
     <form onSubmit={runSearch} className="admin-form" style={{ gridTemplateColumns: "minmax(0, 2fr) auto" }}>
@@ -80,9 +115,12 @@ export function Patients({ mailConfigured }: { mailConfigured: boolean }) {
             <td className="numeric">{match.age}</td>
             <td>{match.sex}</td>
             <td><Badge tone={portalTone[match.portal]}>{portalLabel[match.portal]}</Badge></td>
-            <td>{match.portal === "none" || match.portal === "invited"
-              ? <Button type="button" size="small" variant="ghost" onClick={() => setInviting(match)}><Mail />{match.portal === "invited" ? "Send a new link" : "Invite to portal"}</Button>
-              : <span className="field-hint">—</span>}</td>
+            <td><div className="table-actions">
+              <Button type="button" size="small" variant="ghost" onClick={() => edit(match.id)}><Pencil />Edit details</Button>
+              {match.portal === "none" || match.portal === "invited"
+                ? <Button type="button" size="small" variant="ghost" onClick={() => { setEditing(null); setInviting(match); }}><Mail />{match.portal === "invited" ? "Send a new link" : "Invite to portal"}</Button>
+                : null}
+            </div></td>
           </tr>)}</tbody>
         </table>
       </div>}
@@ -102,5 +140,30 @@ export function Patients({ mailConfigured }: { mailConfigured: boolean }) {
         <span className="field-hint">{mailConfigured ? "Emailed to the patient; the link expires in 7 days." : "No mail provider is configured, so the link is shown here to pass on. It expires in 7 days."}</span>
       </div>
     </form> : null}
+
+    {editing ? <PatientCorrection key={editing} patientId={editing} onClose={() => setEditing(null)} onSaved={saved} /> : null}
+    {corrected ? <p className="field-hint" role="status" style={{ marginTop: 14 }}>{corrected}</p> : null}
+
+    {review === null ? <p className="field-error" role="alert" style={{ marginTop: 24 }}>Recent registrations could not be read. Reload the page to try again.</p> : null}
+    {review ? <div className="specimen" style={{ marginTop: 24 }}>
+      <div className="specimen-topline"><strong>Recent registrations</strong><span>last {review.days} days · {review.registrations.length === 100 ? "latest 100" : review.registrations.length}</span></div>
+      {!review.registrations.length ? <div className="state-panel" style={{ textAlign: "center", minHeight: 0, padding: "32px 24px" }}>
+        <h3>No new patients</h3><p>Patients the front desk registers appear here for you to check.</p>
+      </div> : <div className="table-scroll">
+        <table className="clinical-table">
+          <caption className="sr-only">Patients registered in the last {review.days} days</caption>
+          <thead><tr><th scope="col">Patient</th><th scope="col">Record number</th><th scope="col">Age</th><th scope="col">Registered by</th><th scope="col">When</th><th scope="col">Actions</th></tr></thead>
+          <tbody>{review.registrations.map((row) => <tr key={row.id}>
+            <td>{clinicalName(row.givenName, row.surname)}{row.correctedBy ? <> <Badge tone="high">corrected by {row.correctedBy}</Badge></> : null}</td>
+            <td className="mono">{row.mrn}</td>
+            <td className="numeric">{row.age}</td>
+            <td>{row.registeredBy}</td>
+            <td className="numeric">{row.registeredAt}</td>
+            <td><Button type="button" size="small" variant="ghost" onClick={() => edit(row.id)}><Pencil />Edit details</Button></td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+      <div className="queue-footer"><span>Registrations take effect straight away. Check them here, and correct anything mistyped.</span></div>
+    </div> : null}
   </>;
 }

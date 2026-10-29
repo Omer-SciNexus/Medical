@@ -251,6 +251,35 @@ export async function searchPatientsByTerm(clinicId: string, term: string) {
       sql`(lower(${patients.surname}) LIKE ${like} OR lower(${patients.givenName}) LIKE ${like} OR lower(${patients.mrn}) LIKE ${like})`))
     .orderBy(asc(patients.surname), asc(patients.givenName)).limit(25);
 }
+/** Same date of birth and the same two names, in either order, ignoring case. */
+export async function findNameAndBirthMatches(clinicId: string, input: { givenName: string; surname: string; birthDate: string }) {
+  const given = input.givenName.toLowerCase(), surname = input.surname.toLowerCase();
+  return getDb().select({ id: patients.id, givenName: patients.givenName, surname: patients.surname, birthDate: patients.birthDate, sex: patients.sex, mrn: patients.mrn })
+    .from(patients).where(and(eq(patients.clinicId, clinicId), isNull(patients.deletedAt), eq(patients.birthDate, input.birthDate),
+      sql`((lower(${patients.givenName}) = ${given} AND lower(${patients.surname}) = ${surname}) OR (lower(${patients.givenName}) = ${surname} AND lower(${patients.surname}) = ${given}))`))
+    .orderBy(asc(patients.mrn)).limit(10);
+}
+// Microseconds, exactly as stored: a JavaScript Date would round the comparison away.
+const patientVersion = sql<string>`(extract(epoch from ${patients.updatedAt}) * 1000000)::bigint::text`;
+export async function findPatientDetails(clinicId: string, patientId: string) {
+  const [patient] = await getDb().select({ id: patients.id, givenName: patients.givenName, surname: patients.surname, birthDate: patients.birthDate, sex: patients.sex, mrn: patients.mrn, version: patientVersion })
+    .from(patients).where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId), isNull(patients.deletedAt))).limit(1);
+  return patient;
+}
+export async function updatePatientDetails(actor: Actor, patientId: string, version: string, details: { givenName: string; surname: string; birthDate: string; sex: string }) {
+  const [patient] = await getDb().update(patients).set({ ...details, updatedBy: actor.id })
+    .where(and(eq(patients.id, patientId), eq(patients.clinicId, actor.clinicId), isNull(patients.deletedAt), sql`${patientVersion} = ${version}`))
+    .returning({ id: patients.id, mrn: patients.mrn });
+  return patient;
+}
+export async function listRegistrationsSince(clinicId: string, since: Date) {
+  return getDb().select({ id: patients.id, givenName: patients.givenName, surname: patients.surname, birthDate: patients.birthDate, sex: patients.sex, mrn: patients.mrn,
+    createdAt: patients.createdAt, createdBy: patients.createdBy, updatedBy: patients.updatedBy,
+    // Insert stamps both columns alike and the provenance trigger restamps updated_at, so later means corrected.
+    corrected: sql<boolean>`${patients.updatedAt} > ${patients.createdAt}` })
+    .from(patients).where(and(eq(patients.clinicId, clinicId), isNull(patients.deletedAt), gte(patients.createdAt, since)))
+    .orderBy(desc(patients.createdAt)).limit(100);
+}
 export async function listTemplates(clinicId: string) {
   return getDb().select({ id: availabilityTemplates.id, providerId: availabilityTemplates.providerId, weekday: availabilityTemplates.weekday,
     startMinute: availabilityTemplates.startMinute, endMinute: availabilityTemplates.endMinute, slotMinutes: availabilityTemplates.slotMinutes })
