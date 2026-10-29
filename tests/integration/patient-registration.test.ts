@@ -11,7 +11,7 @@ import { encryptSecret } from "../../src/modules/identity/crypto";
 import { AccessDeniedError, PersonAdminError, invitePatientPortal, listPortalLinks } from "../../src/modules/identity/service";
 import { acceptInvitation } from "../../src/modules/identity/auth";
 import { resolveSession } from "../../src/modules/identity/sessions";
-import { registerPatient, searchPatients, getPatientDetails, correctPatient, listRecentRegistrations, AccessScopeError } from "../../src/modules/scheduling/service";
+import { registerPatient, searchPatients, listPatients, getPatientDetails, correctPatient, listRecentRegistrations, AccessScopeError } from "../../src/modules/scheduling/service";
 import { PatientRegistrationError, PossibleDuplicateError } from "../../src/modules/scheduling/validators";
 import { listMyAppointments } from "../../src/modules/scheduling/service";
 import type { Actor } from "../../src/modules/identity/validators";
@@ -101,6 +101,31 @@ describe("registering a patient", () => {
     const again = await searchPatients(staff(), { term: "yenikayit" });
     expect(again.every((match) => match.surname === "Yenikayit")).toBe(true);
     expect(again).toHaveLength(byName.length);
+  });
+});
+
+describe("browsing every patient", () => {
+  it("pages through the clinic's patients by surname, counts them all, and records each page read", async () => {
+    const first = await listPatients(staff(), {});
+    expect(first.page).toBe(1);
+    const count = await owner.query("SELECT count(*)::int AS count FROM patients WHERE clinic_id = $1 AND deleted_at IS NULL", [seedIds.clinic]);
+    expect(first.total).toBe(count.rows[0].count);
+    expect(first.patients.length).toBe(Math.min(first.pageSize, first.total));
+    // Ordered as the database collates names, not as JavaScript would sort them.
+    const ordered = await owner.query("SELECT id FROM patients WHERE clinic_id = $1 AND deleted_at IS NULL ORDER BY surname, given_name, id LIMIT $2", [seedIds.clinic, first.pageSize]);
+    expect(first.patients.map((patient) => patient.id)).toEqual(ordered.rows.map((row) => row.id));
+    // Another clinic's patients are neither listed nor counted.
+    const other = await owner.query("SELECT id FROM patients WHERE clinic_id <> $1", [seedIds.clinic]);
+    const seen = new Set(first.patients.map((patient) => patient.id));
+    expect(other.rows.some((row) => seen.has(row.id))).toBe(false);
+    const beyond = await listPatients(admin(), { page: Math.ceil(first.total / first.pageSize) + 1 });
+    expect(beyond.patients).toHaveLength(0);
+    expect(beyond.total).toBe(first.total);
+    await expect(listPatients(staff(), { page: 0 })).rejects.toThrow();
+    await expect(listPatients(clinician(), {})).rejects.toBeInstanceOf(AccessScopeError);
+    await expect(listPatients(staff({ mfaVerified: false }), {})).rejects.toBeInstanceOf(AccessScopeError);
+    const audit = await owner.query("SELECT count(*)::int AS count FROM audit_log WHERE action = 'scheduling.patient_list' AND actor_id = $1", [seedIds.staff]);
+    expect(audit.rows[0].count).toBeGreaterThanOrEqual(1);
   });
 });
 

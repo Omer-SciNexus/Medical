@@ -5,9 +5,9 @@ import { auditedPatientOperation } from "@/modules/identity";
 import { getDb, type Transaction } from "@/platform/db";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { addClinicDays, clinicDayRange, clinicTimezone, todayInZone, weekdayOf, zonedInstant, zonedStartOfDay } from "@/lib/clinic-day";
-import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
+import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
-import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
+import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
 // here would recurse. It returns only scope membership and is not a Server Action.
@@ -201,6 +201,15 @@ export async function searchPatients(actor: Actor, input: unknown) {
   const matches = await searchPatientsByTerm(actor.clinicId, term);
   await recordScopedEvent(actor, { action: "scheduling.patient_search", purpose: "scheduling", reason: `${matches.length}` });
   return matches;
+}
+const PATIENT_PAGE_SIZE = 25;
+/** Browsing reads names across the clinic just as a search does, so each page viewed is recorded. */
+export async function listPatients(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { page } = patientListSchema.parse(input);
+  const { rows, total } = await listPatientsPage(actor.clinicId, page, PATIENT_PAGE_SIZE);
+  await recordScopedEvent(actor, { action: "scheduling.patient_list", purpose: "scheduling", reason: `page ${page}: ${rows.length}` });
+  return { patients: rows, page, pageSize: PATIENT_PAGE_SIZE, total };
 }
 // Schedule authoring is an administrative act on clinic property, not on patient data, so it
 // is recorded as a clinic-scoped event rather than through patient authorization.

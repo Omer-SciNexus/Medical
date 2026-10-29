@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import { useActionState } from "react";
-import { Check, Copy, Loader2, Mail, Pencil, Search, UserRoundPlus } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Copy, List, Loader2, Mail, Pencil, Search, UserRoundPlus } from "lucide-react";
 import { Badge, Button, Field, Input } from "@/components/ui/primitives";
 import { clinicalName } from "@/lib/format";
 import { idleAction } from "@/lib/action-state";
-import { invitePatientPortalAction, registerPatientAction, searchPatientsAction, type PatientMatch, type RegisterState, type SearchResult } from "@/app/staff/actions";
+import { invitePatientPortalAction, listPatientsAction, registerPatientAction, searchPatientsAction, type PatientMatch, type PatientPage, type RegisterState, type SearchResult } from "@/app/staff/actions";
 import { PatientCorrection } from "./correction";
 
 const portalTone = { none: "neutral", invited: "high", active: "accent", deactivated: "critical" } as const;
@@ -25,6 +25,20 @@ export function Patients({ mailConfigured, review }: { mailConfigured: boolean; 
   const [registerState, register, registerPending] = useActionState<RegisterState, FormData>(registerPatientAction, idleAction);
   const [inviteState, invite, invitePending] = useActionState(invitePatientPortalAction, idleAction);
   const [copied, setCopied] = React.useState(false);
+  const [list, setList] = React.useState<PatientPage | null>(null);
+  const [listPage, setListPage] = React.useState(1);
+  const [listing, setListing] = React.useState(false);
+
+  const loadList = React.useCallback(async (page: number) => {
+    setListing(true);
+    setList(await listPatientsAction(page));
+    setListPage(page);
+    setListing(false);
+  }, []);
+  React.useEffect(() => { void loadList(1); }, [loadList]);
+  // A new registration or a new invitation changes what the list shows, so the current page is read again.
+  React.useEffect(() => { if (registerState.ok) void loadList(listPage); }, [registerState]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (inviteState.link) void loadList(listPage); }, [inviteState.link]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function search(value: string) {
     setSearching(true);
@@ -41,7 +55,11 @@ export function Patients({ mailConfigured, review }: { mailConfigured: boolean; 
   const saved = React.useCallback((notice: string) => {
     setEditing(null); setCorrected(notice);
     if (result?.ok && term.trim().length >= 2) void search(term);
-  }, [result, term]);
+    void loadList(listPage);
+  }, [result, term, loadList, listPage]);
+  function clearSearch() { setTerm(""); setResult(null); }
+  function startInvite(match: PatientMatch) { setEditing(null); setInviting(match); }
+  const pages = list?.ok ? Math.max(1, Math.ceil(list.total / list.pageSize)) : 1;
   React.useEffect(() => { setCopied(false); }, [inviteState.link]);
   // A successful invitation closes the form but keeps the link on screen to copy.
   React.useEffect(() => { if (inviteState.link) setInviting(null); }, [inviteState.link]);
@@ -90,7 +108,10 @@ export function Patients({ mailConfigured, review }: { mailConfigured: boolean; 
     <form onSubmit={runSearch} className="admin-form" style={{ gridTemplateColumns: "minmax(0, 2fr) auto" }}>
       <Field label="Find a patient" id="term" hint="Surname, given name or record number. At least two characters.">
         <Input id="term" value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Yilmaz, or MR-2481" maxLength={80} /></Field>
-      <div><Button type="submit" variant="secondary" disabled={searching || term.trim().length < 2}>{searching ? <Loader2 /> : <Search />}Search</Button></div>
+      <div className="table-actions">
+        <Button type="submit" variant="secondary" disabled={searching || term.trim().length < 2}>{searching ? <Loader2 /> : <Search />}Search</Button>
+        {result ? <Button type="button" variant="ghost" onClick={clearSearch}><List />Show all patients</Button> : null}
+      </div>
     </form>
 
     {inviteState.link ? <div className="invite-link" role="status">
@@ -105,27 +126,26 @@ export function Patients({ mailConfigured, review }: { mailConfigured: boolean; 
       <div className="specimen-topline"><strong>Matches</strong><span>{result.matches.length === 25 ? "first 25" : `${result.matches.length} found`}</span></div>
       {!result.matches.length ? <div className="state-panel" style={{ textAlign: "center", minHeight: 0, padding: "32px 24px" }}>
         <h3>Nothing matched</h3><p>Check the spelling, or register the patient above.</p>
-      </div> : <div className="table-scroll">
-        <table className="clinical-table">
-          <caption className="sr-only">Patients matching the search</caption>
-          <thead><tr><th scope="col">Patient</th><th scope="col">Record number</th><th scope="col">Age</th><th scope="col">Sex</th><th scope="col">Portal</th><th scope="col">Actions</th></tr></thead>
-          <tbody>{result.matches.map((match) => <tr key={match.id}>
-            <td>{clinicalName(match.givenName, match.surname)}</td>
-            <td className="mono">{match.mrn}</td>
-            <td className="numeric">{match.age}</td>
-            <td>{match.sex}</td>
-            <td><Badge tone={portalTone[match.portal]}>{portalLabel[match.portal]}</Badge></td>
-            <td><div className="table-actions">
-              <Button type="button" size="small" variant="ghost" onClick={() => edit(match.id)}><Pencil />Edit details</Button>
-              {match.portal === "none" || match.portal === "invited"
-                ? <Button type="button" size="small" variant="ghost" onClick={() => { setEditing(null); setInviting(match); }}><Mail />{match.portal === "invited" ? "Send a new link" : "Invite to portal"}</Button>
-                : null}
-            </div></td>
-          </tr>)}</tbody>
-        </table>
-      </div>}
+      </div> : <PatientTable caption="Patients matching the search" patients={result.matches} onEdit={edit} onInvite={startInvite} />}
       <div className="queue-footer"><span>An age is shown here, never a date of birth. Opening a chart is a separate, authorized step.</span></div>
     </div> : null}
+
+    {!result && list?.ok === false ? <p className="field-error" role="alert">{list.error}</p> : null}
+    {!result && list?.ok ? <div className="specimen" aria-busy={listing}>
+      <div className="specimen-topline"><strong>All patients</strong><span>{list.total === 1 ? "1 registered" : `${list.total} registered`}</span></div>
+      {!list.patients.length ? <div className="state-panel" style={{ textAlign: "center", minHeight: 0, padding: "32px 24px" }}>
+        <h3>No patients yet</h3><p>Patients you register above appear here.</p>
+      </div> : <PatientTable caption="All registered patients, by surname" patients={list.patients} onEdit={edit} onInvite={startInvite} />}
+      <div className="queue-footer">
+        <span>By surname. {list.total ? `Showing ${(list.page - 1) * list.pageSize + 1}–${(list.page - 1) * list.pageSize + list.patients.length} of ${list.total}.` : null}</span>
+        {pages > 1 ? <div className="table-actions">
+          <Button type="button" size="small" variant="ghost" disabled={listing || list.page <= 1} onClick={() => void loadList(list.page - 1)}><ChevronLeft />Previous</Button>
+          <span className="field-hint">Page {list.page} of {pages}</span>
+          <Button type="button" size="small" variant="ghost" disabled={listing || list.page >= pages} onClick={() => void loadList(list.page + 1)}>Next<ChevronRight /></Button>
+        </div> : null}
+      </div>
+    </div> : null}
+    {!result && !list ? <p className="field-hint" role="status">Loading patients…</p> : null}
 
     {inviting ? <form action={invite} className="admin-form schedule-form" aria-busy={invitePending} style={{ marginTop: 18 }}>
       <input type="hidden" name="patientId" value={inviting.id} />
@@ -166,4 +186,26 @@ export function Patients({ mailConfigured, review }: { mailConfigured: boolean; 
       <div className="queue-footer"><span>Registrations take effect straight away. Check them here, and correct anything mistyped.</span></div>
     </div> : null}
   </>;
+}
+
+function PatientTable({ caption, patients, onEdit, onInvite }: { caption: string; patients: PatientMatch[]; onEdit: (id: string) => void; onInvite: (match: PatientMatch) => void }) {
+  return <div className="table-scroll">
+    <table className="clinical-table">
+      <caption className="sr-only">{caption}</caption>
+      <thead><tr><th scope="col">Patient</th><th scope="col">Record number</th><th scope="col">Age</th><th scope="col">Sex</th><th scope="col">Portal</th><th scope="col">Actions</th></tr></thead>
+      <tbody>{patients.map((match) => <tr key={match.id}>
+        <td>{clinicalName(match.givenName, match.surname)}</td>
+        <td className="mono">{match.mrn}</td>
+        <td className="numeric">{match.age}</td>
+        <td>{match.sex}</td>
+        <td><Badge tone={portalTone[match.portal]}>{portalLabel[match.portal]}</Badge></td>
+        <td><div className="table-actions">
+          <Button type="button" size="small" variant="ghost" onClick={() => onEdit(match.id)}><Pencil />Edit details</Button>
+          {match.portal === "none" || match.portal === "invited"
+            ? <Button type="button" size="small" variant="ghost" onClick={() => onInvite(match)}><Mail />{match.portal === "invited" ? "Send a new link" : "Invite to portal"}</Button>
+            : null}
+        </div></td>
+      </tr>)}</tbody>
+    </table>
+  </div>;
 }

@@ -55,6 +55,7 @@ export const patientRegistrationSchema = patientDetailsSchema.extend({
 export const patientCorrectionSchema = patientDetailsSchema.extend({ patientId: z.uuid(), version: z.string().regex(/^\d{1,20}$/) });
 export const patientIdSchema = z.object({ patientId: z.uuid() });
 export const patientSearchSchema = z.object({ term: z.string().trim().min(2, "Enter at least two characters.").max(80) });
+export const patientListSchema = z.object({ page: z.coerce.number().int().min(1).max(10_000).default(1) });
 
 export class PatientRegistrationError extends Error {
   constructor(message: string) { super(message); this.name = "PatientRegistrationError"; }
