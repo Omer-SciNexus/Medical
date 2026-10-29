@@ -1,6 +1,6 @@
 export { resolvePatientScope, resolveImminentVisit, listProviderAvailability, bookAppointment, listMyAppointments, listMyAppointmentPage, getClinicianQueue, advanceAppointment, beginAppointmentInTransaction, completeAppointmentInTransaction, getAppointmentForCare, getPatientIdentity, AccessScopeError } from "./service";
 export { getScheduleAuthoring, addAvailabilityTemplate, removeAvailabilityTemplate, addScheduleBlackout, removeScheduleBlackout, extendProviderSchedule, getProviderSlotCount } from "./service";
-export { registerPatient, searchPatients, getPatientDetails, correctPatient, listRecentRegistrations } from "./service";
+export { registerPatient, searchPatients, listPatients, getPatientDetails, correctPatient, listRecentRegistrations } from "./service";
 export { reschedulePatientAppointment, listMyAppointmentOptions } from "./service";
 export { getWaitingRoomBoard, getClinicReport } from "./service";
 export { findReminderTarget, listReminderWindow } from "./repository";

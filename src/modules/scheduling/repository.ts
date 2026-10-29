@@ -251,6 +251,16 @@ export async function searchPatientsByTerm(clinicId: string, term: string) {
       sql`(lower(${patients.surname}) LIKE ${like} OR lower(${patients.givenName}) LIKE ${like} OR lower(${patients.mrn}) LIKE ${like})`))
     .orderBy(asc(patients.surname), asc(patients.givenName)).limit(25);
 }
+/** One page of the clinic's patients in name order, with the total so the page can say how many there are. */
+export async function listPatientsPage(clinicId: string, page: number, pageSize: number) {
+  const where = and(eq(patients.clinicId, clinicId), isNull(patients.deletedAt));
+  const [rows, [total]] = await Promise.all([
+    getDb().select({ id: patients.id, givenName: patients.givenName, surname: patients.surname, birthDate: patients.birthDate, sex: patients.sex, mrn: patients.mrn })
+      .from(patients).where(where).orderBy(asc(patients.surname), asc(patients.givenName), asc(patients.id)).limit(pageSize).offset((page - 1) * pageSize),
+    getDb().select({ count: sql<number>`count(*)::int` }).from(patients).where(where),
+  ]);
+  return { rows, total: Number(total?.count ?? 0) };
+}
 /** Same date of birth and the same two names, in either order, ignoring case. */
 export async function findNameAndBirthMatches(clinicId: string, input: { givenName: string; surname: string; birthDate: string }) {
   const given = input.givenName.toLowerCase(), surname = input.surname.toLowerCase();
