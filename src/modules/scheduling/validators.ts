@@ -57,6 +57,20 @@ export const patientIdSchema = z.object({ patientId: z.uuid() });
 export const patientSearchSchema = z.object({ term: z.string().trim().min(2, "Enter at least two characters.").max(80) });
 export const patientListSchema = z.object({ page: z.coerce.number().int().min(1).max(10_000).default(1) });
 
+const optionalText = (max: number, message?: string) => z.string().trim().max(max, message).optional().transform((value) => value || undefined);
+export const appointmentRequestSchema = patientDetailsSchema.pick({ givenName: true, surname: true, birthDate: true }).extend({
+  clinicId: z.uuid("This request link is not valid."),
+  contactEmail: z.string().trim().toLowerCase().max(254).pipe(z.email("Enter a valid email address.")),
+  contactPhone: optionalText(32, "Use no more than 32 characters."),
+  reason: bookingSchema.shape.reason,
+  preferredTimes: optionalText(300, "Use no more than 300 characters."),
+});
+export type AppointmentRequestInput = z.infer<typeof appointmentRequestSchema>;
+export const requestTokenSchema = z.string().regex(/^[a-f0-9]{64}$/);
+export const appointmentRequestIdSchema = z.object({ requestId: z.uuid() });
+export const linkAppointmentRequestSchema = appointmentRequestIdSchema.extend({ patientId: z.uuid("Choose a patient.") });
+export const declineAppointmentRequestSchema = appointmentRequestIdSchema.extend({ note: optionalText(200, "Use no more than 200 characters.") });
+
 export class PatientRegistrationError extends Error {
   constructor(message: string) { super(message); this.name = "PatientRegistrationError"; }
 }
@@ -64,6 +78,9 @@ export type PossibleDuplicate = { id: string; givenName: string; surname: string
 /** Not a failure: the registration waits until the front desk confirms this is someone else. */
 export class PossibleDuplicateError extends Error {
   constructor(readonly matches: PossibleDuplicate[]) { super("A patient with this name and date of birth is already registered."); this.name = "PossibleDuplicateError"; }
+}
+export class AppointmentRequestError extends Error {
+  constructor(message: string) { super(message); this.name = "AppointmentRequestError"; }
 }
 export class ScheduleAuthoringError extends Error {
   constructor(message: string) { super(message); this.name = "ScheduleAuthoringError"; }

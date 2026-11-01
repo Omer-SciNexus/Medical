@@ -1,12 +1,17 @@
 import "server-only";
 import { z } from "zod";
 import { getClinicSettings, recordScopedEvent, type Actor } from "@/modules/identity";
-import { auditedPatientOperation } from "@/modules/identity";
+import { auditedPatientOperation, describeRequestClinic, digest, invitePatientPortal, listPortalLinks, newToken, PersonAdminError, recordSystemEvent } from "@/modules/identity";
 import { getDb, type Transaction } from "@/platform/db";
+import { getRedis } from "@/platform/redis";
+import { exceedsLimit } from "@/platform/rate-limit";
+import { sendMail } from "@/platform/mailer";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { addClinicDays, clinicDayRange, clinicTimezone, todayInZone, weekdayOf, zonedInstant, zonedStartOfDay } from "@/lib/clinic-day";
+import { appointmentRequestIdSchema, appointmentRequestSchema, declineAppointmentRequestSchema, linkAppointmentRequestSchema, requestTokenSchema, AppointmentRequestError } from "./validators";
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
+import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
 import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
@@ -338,4 +343,106 @@ export async function listMyAppointmentPage(actor: Actor, input: unknown) {
   const page = z.object({ view: z.enum(["upcoming", "past"]).default("upcoming"), number: z.coerce.number().int().min(1).max(10000).default(1) }).parse(input);
   const rows = await listPatientAppointments(actor, ownPatientId(actor), { ...page, at: new Date() });
   return { entries: rows.slice(0, 25), hasMore: rows.length > 25, ...page };
+}
+
+const REQUEST_CONFIRM_SECONDS = 24 * 60 * 60;
+const requestKey = (token: string) => `appt_request:${digest(token)}`;
+const tooManyRequests = () => new AppointmentRequestError("Too many requests from here. Please wait 15 minutes and try again.");
+/**
+ * Nothing reaches a clinic's queue until the requester proves the address: until then the
+ * request lives only in Redis, so an unconfirmed or abusive submission never becomes a row.
+ */
+export async function submitAppointmentRequest(input: unknown, trustedClientAddress: string, origin: string) {
+  const request = appointmentRequestSchema.parse(input);
+  if (await exceedsLimit(`limit:request_address:${digest(trustedClientAddress)}`, 10)) throw tooManyRequests();
+  if (await exceedsLimit(`limit:request_email:${digest(request.contactEmail)}`, 3)) throw tooManyRequests();
+  const clinic = await describeRequestClinic(request.clinicId);
+  if (!clinic) throw new AppointmentRequestError("This request link is not valid. Ask the clinic for a new one.");
+  const token = newToken();
+  await getRedis().set(requestKey(token), JSON.stringify(request), "EX", REQUEST_CONFIRM_SECONDS);
+  // Account mail only: the reason for the visit stays out of the message.
+  await sendMail({ to: request.contactEmail, subject: `Confirm your appointment request with ${clinic.name}`,
+    text: `${request.givenName},\n\nOpen the link below within 24 hours to send your appointment request to ${clinic.name}. Until you do, the clinic does not receive it.\n\n${origin}/request-appointment/confirm?token=${token}\n\nIf you did not ask for an appointment, ignore this message.` });
+}
+/** Single use: the payload is taken and deleted in one step, so a second click finds nothing. */
+export async function confirmAppointmentRequest(token: unknown) {
+  const parsed = requestTokenSchema.safeParse(token);
+  if (!parsed.success) return false;
+  const stored = await getRedis().getdel(requestKey(parsed.data));
+  if (!stored) return false;
+  const request = appointmentRequestSchema.parse(JSON.parse(stored));
+  const row = await insertAppointmentRequest(request);
+  await recordSystemEvent({ clinicId: request.clinicId, action: "scheduling.request_received", purpose: "scheduling", resourceId: row.id });
+  return true;
+}
+/** Reading the queue reads names and contact details across the clinic, so it is recorded. */
+export async function listAppointmentRequests(actor: Actor) {
+  requireFrontDesk(actor);
+  const rows = await listPendingAppointmentRequests(actor.clinicId);
+  await recordScopedEvent(actor, { action: "scheduling.requests_read", purpose: "scheduling", reason: `${rows.length}` });
+  return rows;
+}
+async function pendingRequest(actor: Actor, requestId: string) {
+  const request = await findPendingAppointmentRequest(actor.clinicId, requestId);
+  if (!request) throw new AppointmentRequestError("That request has already been dealt with.");
+  return request;
+}
+/** The same name-and-birth-date check registration runs, against what the requester typed. */
+export async function findRequestMatches(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { requestId } = appointmentRequestIdSchema.parse(input);
+  const request = await pendingRequest(actor, requestId);
+  const matches = await findNameAndBirthMatches(actor.clinicId, request);
+  await recordScopedEvent(actor, { action: "scheduling.duplicate_check", purpose: "scheduling", resourceId: requestId, reason: `${matches.length}` });
+  return matches;
+}
+async function settle(actor: Actor, requestId: string, outcome: Parameters<typeof settleAppointmentRequest>[2]) {
+  if (!await settleAppointmentRequest(actor, requestId, outcome)) throw new AppointmentRequestError("That request has already been dealt with.");
+  await recordScopedEvent(actor, { action: outcome.status === "declined" ? "scheduling.request_declined" : "scheduling.request_resolved", purpose: "scheduling",
+    patientId: outcome.linkedPatientId, resourceId: requestId, reason: outcome.resolution });
+}
+const displayNameOf = (request: { givenName: string; surname: string }) => `${request.givenName} ${request.surname}`;
+/**
+ * Staff never book on a patient's behalf: the request ends in a portal invitation, and the
+ * patient books from there, which is what grants the clinician scheduling authority.
+ */
+export async function linkAppointmentRequestToPatient(actor: Actor, input: unknown, origin: string) {
+  requireFrontDesk(actor);
+  const { requestId, patientId } = linkAppointmentRequestSchema.parse(input);
+  const request = await pendingRequest(actor, requestId);
+  const links = await listPortalLinks(actor, [patientId]);
+  if (links.accounts.some((account) => account.patientId === patientId)) {
+    await settle(actor, requestId, { status: "resolved", resolution: "linked_existing_account", linkedPatientId: patientId });
+    return { outcome: "existing_account" as const };
+  }
+  if (links.pending.some((invitation) => invitation.patientId === patientId)) {
+    await settle(actor, requestId, { status: "resolved", resolution: "linked_invitation_pending", linkedPatientId: patientId });
+    return { outcome: "invitation_pending" as const };
+  }
+  const invitation = await invitePatientPortal(actor, { patientId, email: request.contactEmail, displayName: displayNameOf(request) }, origin);
+  await settle(actor, requestId, { status: "resolved", resolution: "linked_invited", linkedPatientId: patientId });
+  return { outcome: "invited" as const, link: invitation.link, delivered: invitation.delivered };
+}
+/** Staff have already seen the possible matches for this request, so registration does not ask again. */
+export async function registerAndInviteFromRequest(actor: Actor, input: unknown, origin: string) {
+  requireFrontDesk(actor);
+  const { requestId } = appointmentRequestIdSchema.parse(input);
+  const request = await pendingRequest(actor, requestId);
+  const patient = await registerPatient(actor, { givenName: request.givenName, surname: request.surname, birthDate: request.birthDate, sex: "unknown", confirmDistinct: true });
+  // The record now exists, so the request settles either way; leaving it pending would invite a
+  // second registration of the same person. A refused invitation is reported, not thrown.
+  try {
+    const invitation = await invitePatientPortal(actor, { patientId: patient.id, email: request.contactEmail, displayName: displayNameOf(request) }, origin);
+    await settle(actor, requestId, { status: "resolved", resolution: "registered_invited", linkedPatientId: patient.id });
+    return { mrn: patient.mrn, link: invitation.link, delivered: invitation.delivered };
+  } catch (error) {
+    if (!(error instanceof PersonAdminError)) throw error;
+    await settle(actor, requestId, { status: "resolved", resolution: "registered_not_invited", linkedPatientId: patient.id });
+    return { mrn: patient.mrn, inviteError: error.message };
+  }
+}
+export async function declineAppointmentRequest(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { requestId, note } = declineAppointmentRequestSchema.parse(input);
+  await settle(actor, requestId, { status: "declined", resolution: note ?? "declined" });
 }

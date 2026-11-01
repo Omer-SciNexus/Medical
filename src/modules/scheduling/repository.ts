@@ -4,8 +4,8 @@ import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, grantWorkflowAccess, type Actor } from "@/modules/identity";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { enqueueOutbox } from "@/platform/outbox";
-import { appointments, availabilitySlots, availabilityTemplates, patients, scheduleBlackouts } from "./schema";
-import { SlotUnavailableError, StaleAppointmentError, type AppointmentStatus } from "./validators";
+import { appointmentRequests, appointments, availabilitySlots, availabilityTemplates, patients, scheduleBlackouts } from "./schema";
+import { SlotUnavailableError, StaleAppointmentError, type AppointmentRequestInput, type AppointmentStatus } from "./validators";
 
 // Authorization metadata only. Never return clinical or demographic fields here.
 export async function patientIsInClinic(clinicId: string, patientId: string, tx?: Transaction) {
@@ -268,6 +268,29 @@ export async function findNameAndBirthMatches(clinicId: string, input: { givenNa
     .from(patients).where(and(eq(patients.clinicId, clinicId), isNull(patients.deletedAt), eq(patients.birthDate, input.birthDate),
       sql`((lower(${patients.givenName}) = ${given} AND lower(${patients.surname}) = ${surname}) OR (lower(${patients.givenName}) = ${surname} AND lower(${patients.surname}) = ${given}))`))
     .orderBy(asc(patients.mrn)).limit(10);
+}
+export async function insertAppointmentRequest(input: AppointmentRequestInput) {
+  const [request] = await getDb().insert(appointmentRequests).values({ clinicId: input.clinicId, givenName: input.givenName, surname: input.surname, birthDate: input.birthDate,
+    contactEmail: input.contactEmail, contactPhone: input.contactPhone ?? null, reason: input.reason, preferredTimes: input.preferredTimes ?? null }).returning({ id: appointmentRequests.id });
+  return request;
+}
+const requestColumns = { id: appointmentRequests.id, givenName: appointmentRequests.givenName, surname: appointmentRequests.surname, birthDate: appointmentRequests.birthDate,
+  contactEmail: appointmentRequests.contactEmail, contactPhone: appointmentRequests.contactPhone, reason: appointmentRequests.reason, preferredTimes: appointmentRequests.preferredTimes, createdAt: appointmentRequests.createdAt };
+export async function listPendingAppointmentRequests(clinicId: string) {
+  return getDb().select(requestColumns).from(appointmentRequests)
+    .where(and(eq(appointmentRequests.clinicId, clinicId), eq(appointmentRequests.status, "pending"))).orderBy(asc(appointmentRequests.createdAt)).limit(100);
+}
+export async function findPendingAppointmentRequest(clinicId: string, requestId: string) {
+  const [request] = await getDb().select(requestColumns).from(appointmentRequests)
+    .where(and(eq(appointmentRequests.id, requestId), eq(appointmentRequests.clinicId, clinicId), eq(appointmentRequests.status, "pending"))).limit(1);
+  return request;
+}
+/** Only a pending request settles, so two people working the queue cannot both act on one. */
+export async function settleAppointmentRequest(actor: Actor, requestId: string, outcome: { status: "resolved" | "declined"; resolution: string; linkedPatientId?: string }) {
+  const [request] = await getDb().update(appointmentRequests)
+    .set({ status: outcome.status, resolution: outcome.resolution, linkedPatientId: outcome.linkedPatientId ?? null, resolvedAt: new Date(), resolvedBy: actor.id })
+    .where(and(eq(appointmentRequests.id, requestId), eq(appointmentRequests.clinicId, actor.clinicId), eq(appointmentRequests.status, "pending"))).returning({ id: appointmentRequests.id });
+  return request;
 }
 // Microseconds, exactly as stored: a JavaScript Date would round the comparison away.
 const patientVersion = sql<string>`(extract(epoch from ${patients.updatedAt}) * 1000000)::bigint::text`;
