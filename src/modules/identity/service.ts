@@ -221,6 +221,23 @@ export async function invitePatientPortal(inputActor: Actor, input: unknown, ori
     text: `${displayName},\n\nYour clinic has set up a portal account for you. Open the link below within ${INVITATION_DAYS} days to choose a password and see your appointments and visit summaries.\n\n${link}\n\nIf this was not expected, ignore this message: the link is single-use and expires on its own.` });
   return { id: invitation.id, link, delivered: delivery.delivered };
 }
+/** Replaces the token on an already-pending patient invitation instead of creating a second
+ * row, which is what lets "send a new link" work without first revoking the old one. */
+export async function resendPatientPortalInvitation(inputActor: Actor, input: unknown, origin: string) {
+  const actor = actorSchema.parse(inputActor);
+  if ((actor.role !== "staff" && actor.role !== "admin") || !actor.mfaVerified || !await currentActorIsValid(actor)) {
+    await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, action: "administration.denied", purpose: "administration", outcome: "denied" });
+    throw new AccessDeniedError();
+  }
+  const { invitationId } = invitationIdSchema.parse(input);
+  const token = newToken();
+  const invitation = await rotateInvitation(actor.clinicId, invitationId, digest(token), new Date(Date.now() + INVITATION_DAYS * 86_400_000), actor.id);
+  if (!invitation) throw new PersonAdminError("That invitation is no longer pending.");
+  const link = invitationLink(origin, token);
+  const delivery = await sendMail({ to: invitation.email, subject: "Your clinic portal invitation",
+    text: `Your previous portal invitation link has been replaced. Open the link below within ${INVITATION_DAYS} days to choose a password and see your appointments and visit summaries.\n\n${link}` });
+  return { link, delivered: delivery.delivered };
+}
 /** Which of these patients already hold a portal account, or have a link waiting. */
 export async function listPortalLinks(inputActor: Actor, patientIds: string[]) {
   const actor = actorSchema.parse(inputActor);

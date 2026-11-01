@@ -6,7 +6,7 @@ import { Check, ChevronLeft, ChevronRight, Copy, List, Loader2, Mail, Pencil, Se
 import { Badge, Button, Field, Input } from "@/components/ui/primitives";
 import { clinicalName } from "@/lib/format";
 import { idleAction } from "@/lib/action-state";
-import { invitePatientPortalAction, listPatientsAction, registerPatientAction, searchPatientsAction, type PatientMatch, type PatientPage, type RegisterState, type SearchResult } from "@/app/staff/actions";
+import { invitePatientPortalAction, listPatientsAction, registerPatientAction, resendPatientPortalInvitationAction, searchPatientsAction, type PatientMatch, type PatientPage, type RegisterState, type SearchResult } from "@/app/staff/actions";
 import { PatientCorrection } from "./correction";
 
 const portalTone = { none: "neutral", invited: "high", active: "accent", deactivated: "critical" } as const;
@@ -24,6 +24,7 @@ export function Patients({ mailConfigured, review }: { mailConfigured: boolean; 
   const [corrected, setCorrected] = React.useState<string | null>(null);
   const [registerState, register, registerPending] = useActionState<RegisterState, FormData>(registerPatientAction, idleAction);
   const [inviteState, invite, invitePending] = useActionState(invitePatientPortalAction, idleAction);
+  const [resendState, resend, resendPending] = useActionState(resendPatientPortalInvitationAction, idleAction);
   const [copied, setCopied] = React.useState(false);
   const [list, setList] = React.useState<PatientPage | null>(null);
   const [listPage, setListPage] = React.useState(1);
@@ -39,6 +40,7 @@ export function Patients({ mailConfigured, review }: { mailConfigured: boolean; 
   // A new registration or a new invitation changes what the list shows, so the current page is read again.
   React.useEffect(() => { if (registerState.ok) void loadList(listPage); }, [registerState]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => { if (inviteState.link) void loadList(listPage); }, [inviteState.link]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (resendState.link) void loadList(listPage); }, [resendState.link]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function search(value: string) {
     setSearching(true);
@@ -60,7 +62,8 @@ export function Patients({ mailConfigured, review }: { mailConfigured: boolean; 
   function clearSearch() { setTerm(""); setResult(null); }
   function startInvite(match: PatientMatch) { setEditing(null); setInviting(match); }
   const pages = list?.ok ? Math.max(1, Math.ceil(list.total / list.pageSize)) : 1;
-  React.useEffect(() => { setCopied(false); }, [inviteState.link]);
+  const linkState = inviteState.link ? inviteState : resendState;
+  React.useEffect(() => { setCopied(false); }, [linkState.link]);
   // A successful invitation closes the form but keeps the link on screen to copy.
   React.useEffect(() => { if (inviteState.link) setInviting(null); }, [inviteState.link]);
 
@@ -114,19 +117,20 @@ export function Patients({ mailConfigured, review }: { mailConfigured: boolean; 
       </div>
     </form>
 
-    {inviteState.link ? <div className="invite-link" role="status">
-      <div><strong>{inviteState.delivered ? "Portal invitation sent. This link also works directly:" : "Portal invitation created. Give this link to the patient:"}</strong><code>{inviteState.link}</code></div>
-      <Button type="button" variant="secondary" size="small" onClick={() => navigator.clipboard.writeText(inviteState.link ?? "").then(() => setCopied(true), () => setCopied(false))}>
+    {linkState.link ? <div className="invite-link" role="status">
+      <div><strong>{linkState.delivered ? "Portal invitation sent. This link also works directly:" : "Portal invitation created. Give this link to the patient:"}</strong><code>{linkState.link}</code></div>
+      <Button type="button" variant="secondary" size="small" onClick={() => navigator.clipboard.writeText(linkState.link ?? "").then(() => setCopied(true), () => setCopied(false))}>
         {copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy link"}</Button>
     </div> : null}
     {inviteState.error ? <p className="field-error" role="alert" style={{ marginBottom: 14 }}>{inviteState.error}</p> : null}
+    {resendState.error ? <p className="field-error" role="alert" style={{ marginBottom: 14 }}>{resendState.error}</p> : null}
 
     {result?.ok === false ? <p className="field-error" role="alert">{result.error}</p> : null}
     {result?.ok ? <div className="specimen">
       <div className="specimen-topline"><strong>Matches</strong><span>{result.matches.length === 25 ? "first 25" : `${result.matches.length} found`}</span></div>
       {!result.matches.length ? <div className="state-panel" style={{ textAlign: "center", minHeight: 0, padding: "32px 24px" }}>
         <h3>Nothing matched</h3><p>Check the spelling, or register the patient above.</p>
-      </div> : <PatientTable caption="Patients matching the search" patients={result.matches} onEdit={edit} onInvite={startInvite} />}
+      </div> : <PatientTable caption="Patients matching the search" patients={result.matches} onEdit={edit} onInvite={startInvite} resendAction={resend} resendPending={resendPending} />}
       <div className="queue-footer"><span>An age is shown here, never a date of birth. Opening a chart is a separate, authorized step.</span></div>
     </div> : null}
 
@@ -135,7 +139,7 @@ export function Patients({ mailConfigured, review }: { mailConfigured: boolean; 
       <div className="specimen-topline"><strong>All patients</strong><span>{list.total === 1 ? "1 registered" : `${list.total} registered`}</span></div>
       {!list.patients.length ? <div className="state-panel" style={{ textAlign: "center", minHeight: 0, padding: "32px 24px" }}>
         <h3>No patients yet</h3><p>Patients you register above appear here.</p>
-      </div> : <PatientTable caption="All registered patients, by surname" patients={list.patients} onEdit={edit} onInvite={startInvite} />}
+      </div> : <PatientTable caption="All registered patients, by surname" patients={list.patients} onEdit={edit} onInvite={startInvite} resendAction={resend} resendPending={resendPending} />}
       <div className="queue-footer">
         <span>By surname. {list.total ? `Showing ${(list.page - 1) * list.pageSize + 1}–${(list.page - 1) * list.pageSize + list.patients.length} of ${list.total}.` : null}</span>
         {pages > 1 ? <div className="table-actions">
@@ -188,7 +192,7 @@ export function Patients({ mailConfigured, review }: { mailConfigured: boolean; 
   </>;
 }
 
-function PatientTable({ caption, patients, onEdit, onInvite }: { caption: string; patients: PatientMatch[]; onEdit: (id: string) => void; onInvite: (match: PatientMatch) => void }) {
+function PatientTable({ caption, patients, onEdit, onInvite, resendAction, resendPending }: { caption: string; patients: PatientMatch[]; onEdit: (id: string) => void; onInvite: (match: PatientMatch) => void; resendAction: (payload: FormData) => void; resendPending: boolean }) {
   return <div className="table-scroll">
     <table className="clinical-table">
       <caption className="sr-only">{caption}</caption>
@@ -201,9 +205,9 @@ function PatientTable({ caption, patients, onEdit, onInvite }: { caption: string
         <td><Badge tone={portalTone[match.portal]}>{portalLabel[match.portal]}</Badge></td>
         <td><div className="table-actions">
           <Button type="button" size="small" variant="ghost" onClick={() => onEdit(match.id)}><Pencil />Edit details</Button>
-          {match.portal === "none" || match.portal === "invited"
-            ? <Button type="button" size="small" variant="ghost" onClick={() => onInvite(match)}><Mail />{match.portal === "invited" ? "Send a new link" : "Invite to portal"}</Button>
-            : null}
+          {match.portal === "none" ? <Button type="button" size="small" variant="ghost" onClick={() => onInvite(match)}><Mail />Invite to portal</Button> : null}
+          {match.portal === "invited" && match.invitationId ? <form action={resendAction}><input type="hidden" name="invitationId" value={match.invitationId} />
+            <Button type="submit" size="small" variant="ghost" disabled={resendPending}><Mail />Send a new link</Button></form> : null}
         </div></td>
       </tr>)}</tbody>
     </table>
