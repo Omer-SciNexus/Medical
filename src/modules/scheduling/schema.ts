@@ -56,3 +56,26 @@ export const appointments = pgTable("appointments", {
 }, (t) => [uniqueIndex("appointments_clinic_id_unique").on(t.clinicId, t.id),
   uniqueIndex("active_slot_booking").on(t.slotId).where(sql`${t.deletedAt} IS NULL AND ${t.status} <> 'cancelled'`),
   index("patient_appointments").on(t.clinicId, t.patientId)]);
+
+export const appointmentRequestStatus = pgEnum("appointment_request_status", ["pending", "resolved", "declined"]);
+
+// Written only once the requester has confirmed their address, and by nobody signed in, so the
+// usual created_by/updated_by columns do not apply. resolved_by names the staff member instead.
+export const appointmentRequests = pgTable("appointment_requests", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  clinicId: uuid("clinic_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  status: appointmentRequestStatus("status").default("pending").notNull(),
+  givenName: text("given_name").notNull(),
+  surname: text("surname").notNull(),
+  birthDate: date("birth_date").notNull(),
+  contactEmail: text("contact_email").notNull(),
+  contactPhone: text("contact_phone"),
+  reason: text("reason").notNull(),
+  preferredTimes: text("preferred_times"),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  resolvedBy: uuid("resolved_by"),
+  resolution: text("resolution"),
+  linkedPatientId: uuid("linked_patient_id"),
+}, (t) => [index("appointment_request_queue").on(t.clinicId, t.status, t.createdAt),
+  check("appointment_request_settled", sql`(${t.status} = 'pending') = (${t.resolvedAt} IS NULL AND ${t.resolvedBy} IS NULL)`)]);

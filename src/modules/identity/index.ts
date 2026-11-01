@@ -3,7 +3,8 @@ export { assertCanAccessPatient, auditedPatientOperation, requestBreakGlass, rec
 export { listPeople, invitePerson, resendPersonInvitation, revokePersonInvitation, setPersonActive, resetPersonMfa, revokePersonSessions, PersonAdminError } from "./service";
 export { invitePatientPortal, resendPatientPortalInvitation, listPortalLinks } from "./service";
 export { grantWorkflowAccess, listAccessGrants, revokeAccessGrant } from "./service";
-export { recordSystemEvent, findPortalContact } from "./service";
+export { recordSystemEvent, findPortalContact, describeRequestClinic } from "./service";
+export { newToken, digest } from "./crypto";
 export { readChainIntegrity, verifyChainFully, exportAuditLog } from "./service";
 export { beginSignIn, finishSignIn, registerWorkspace, acceptInvitation, describeInvitation } from "./auth";
 export { requestPasswordReset, completePasswordReset, confirmEmailVerification, resendOwnVerification, emailVerificationState, restartMfaEnrollment, reissueRecoveryCodes } from "./auth";
