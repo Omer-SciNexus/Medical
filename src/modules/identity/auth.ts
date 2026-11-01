@@ -2,6 +2,7 @@ import "server-only";
 import { TOTP, Secret } from "otpauth";
 import { z } from "zod";
 import { getRedis } from "@/platform/redis";
+import { exceedsLimit } from "@/platform/rate-limit";
 import { ensureDefaultService } from "@/modules/billing";
 import { DEFAULT_CONSULTATION_MINOR } from "@/modules/clinical";
 import { sendMail } from "@/platform/mailer";
@@ -18,9 +19,7 @@ const authFailure = () => new AuthenticationError("The sign-in details could not
 let dummyHash: Promise<string> | undefined;
 
 async function throttle(scope: string, value: string, limit: number) {
-  const key = `limit:${scope}:${digest(value)}`;
-  const count = await getRedis().eval("local n = redis.call('INCR', KEYS[1]); if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end; return n", 1, key, 900);
-  if (Number(count) > limit) throw new AuthenticationError("Too many attempts. Please wait 15 minutes before trying again.");
+  if (await exceedsLimit(`limit:${scope}:${digest(value)}`, limit)) throw new AuthenticationError("Too many attempts. Please wait 15 minutes before trying again.");
 }
 function actorFor(user: NonNullable<Awaited<ReturnType<typeof findUserById>>>, authenticatedAt: number, mfa: boolean, fresh: boolean): Actor {
   return { id: user.id, clinicId: user.clinicId, role: user.role, patientId: user.patientId, authenticatedAt, mfaVerified: mfa, mfaVerifiedAt: fresh ? Date.now() : null };
