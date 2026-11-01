@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { assertSameOrigin, invitePatientPortal, resendPatientPortalInvitation, listPortalLinks, type Actor } from "@/modules/identity";
 import { advanceAppointment, correctPatient, getPatientDetails, PossibleDuplicateError, listPatients, registerPatient, searchPatients } from "@/modules/scheduling";
+import { declineAppointmentRequest, findRequestMatches, linkAppointmentRequestToPatient, registerAndInviteFromRequest } from "@/modules/scheduling";
 import { patientAge } from "@/modules/clinical";
 import { publishChange } from "@/platform/realtime";
 import { requireActor } from "@/app/session";
@@ -107,6 +108,53 @@ export async function resendPatientPortalInvitationAction(_previous: ActionState
     revalidatePath(PATIENTS);
     return { ok: true, link, delivered };
   } catch (error) { return toActionState(error); }
+}
+
+const REQUESTS = "/staff/requests";
+export type MatchesResult = { ok: true; matches: DuplicateMatch[] } | { ok: false; error: string };
+export async function findRequestMatchesAction(requestId: string): Promise<MatchesResult> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    const matches = await findRequestMatches(actor, { requestId });
+    return { ok: true, matches: matches.map((match) => ({ id: match.id, givenName: match.givenName, surname: match.surname, age: patientAge(match.birthDate), sex: match.sex, mrn: match.mrn })) };
+  } catch (error) {
+    const state = toActionState(error);
+    return { ok: false, error: state.error ?? "Possible matches could not be read." };
+  }
+}
+export async function linkRequestAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    const origin = await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    const result = await linkAppointmentRequestToPatient(actor, { requestId: field(form, "requestId"), patientId: field(form, "patientId") }, origin);
+    revalidatePath(REQUESTS);
+    if (result.outcome === "invited") return { ok: true, link: result.link, delivered: result.delivered };
+    return { ok: true, notice: result.outcome === "existing_account"
+      ? "Linked. This patient already has a portal account, so no invitation was sent: let them know they can sign in and book."
+      : "Linked. This patient already has a portal invitation waiting; use Send a new link on the Patients page if they need it again." };
+  } catch (error) { return toActionState(error); }
+}
+export async function registerFromRequestAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    const origin = await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    const result = await registerAndInviteFromRequest(actor, { requestId: field(form, "requestId") }, origin);
+    revalidatePath(REQUESTS);
+    revalidatePath(PATIENTS);
+    if ("inviteError" in result) return { ok: true, notice: `Registered with record number ${result.mrn}, but no invitation was sent: ${result.inviteError}` };
+    return { ok: true, notice: `Registered with record number ${result.mrn}.`, link: result.link, delivered: result.delivered };
+  } catch (error) { return toActionState(error); }
+}
+export async function declineRequestAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const values = { note: field(form, "note") };
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    await declineAppointmentRequest(actor, { requestId: field(form, "requestId"), ...values });
+  } catch (error) { return toActionState(error, values); }
+  revalidatePath(REQUESTS);
+  return { ok: true, notice: "Request declined." };
 }
 
 /** The board's only write. Which transitions staff may make is roleMayTransition's business. */
