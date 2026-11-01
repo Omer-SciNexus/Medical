@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { assertSameOrigin, invitePatientPortal, listPortalLinks, type Actor } from "@/modules/identity";
+import { assertSameOrigin, invitePatientPortal, resendPatientPortalInvitation, listPortalLinks, type Actor } from "@/modules/identity";
 import { advanceAppointment, correctPatient, getPatientDetails, PossibleDuplicateError, listPatients, registerPatient, searchPatients } from "@/modules/scheduling";
 import { patientAge } from "@/modules/clinical";
 import { publishChange } from "@/platform/realtime";
@@ -13,7 +13,7 @@ const PATIENTS = "/staff/patients";
 const field = (form: FormData, name: string) => String(form.get(name) ?? "");
 
 /** An age, never a date of birth: a search result reaches the browser the same way a queue does. */
-export type PatientMatch = { id: string; givenName: string; surname: string; age: number; sex: string; mrn: string; portal: "none" | "invited" | "active" | "deactivated" };
+export type PatientMatch = { id: string; givenName: string; surname: string; age: number; sex: string; mrn: string; portal: "none" | "invited" | "active" | "deactivated"; invitationId?: string };
 export type SearchResult = { ok: true; matches: PatientMatch[] } | { ok: false; error: string };
 
 export type PatientPage = { ok: true; patients: PatientMatch[]; page: number; pageSize: number; total: number } | { ok: false; error: string };
@@ -23,9 +23,9 @@ async function withPortal(actor: Actor, rows: PatientRow[]): Promise<PatientMatc
   const links = await listPortalLinks(actor, rows.map((row) => row.id));
   return rows.map((row) => {
     const account = links.accounts.find((candidate) => candidate.patientId === row.id);
-    const invited = links.pending.some((candidate) => candidate.patientId === row.id);
+    const pending = links.pending.find((candidate) => candidate.patientId === row.id);
     return { id: row.id, givenName: row.givenName, surname: row.surname, age: patientAge(row.birthDate), sex: row.sex, mrn: row.mrn,
-      portal: account ? (account.active ? "active" : "deactivated") : invited ? "invited" : "none" };
+      portal: account ? (account.active ? "active" : "deactivated") : pending ? "invited" : "none", invitationId: pending?.id };
   });
 }
 export async function searchPatientsAction(term: string): Promise<SearchResult> {
@@ -98,6 +98,15 @@ export async function invitePatientPortalAction(_previous: ActionState, form: Fo
     revalidatePath(PATIENTS);
     return { ok: true, link: invitation.link, delivered: invitation.delivered };
   } catch (error) { return toActionState(error, values); }
+}
+export async function resendPatientPortalInvitationAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    const origin = await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    const { link, delivered } = await resendPatientPortalInvitation(actor, { invitationId: field(form, "invitationId") }, origin);
+    revalidatePath(PATIENTS);
+    return { ok: true, link, delivered };
+  } catch (error) { return toActionState(error); }
 }
 
 /** The board's only write. Which transitions staff may make is roleMayTransition's business. */

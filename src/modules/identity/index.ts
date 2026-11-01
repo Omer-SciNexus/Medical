@@ -1,7 +1,7 @@
 export type { Actor, AccessPurpose } from "./validators";
 export { assertCanAccessPatient, auditedPatientOperation, requestBreakGlass, recordScopedEvent, listCareProviders, getClinicSettings, readAuditLog, AccessDeniedError } from "./service";
 export { listPeople, invitePerson, resendPersonInvitation, revokePersonInvitation, setPersonActive, resetPersonMfa, revokePersonSessions, PersonAdminError } from "./service";
-export { invitePatientPortal, listPortalLinks } from "./service";
+export { invitePatientPortal, resendPatientPortalInvitation, listPortalLinks } from "./service";
 export { grantWorkflowAccess, listAccessGrants, revokeAccessGrant } from "./service";
 export { recordSystemEvent, findPortalContact } from "./service";
 export { readChainIntegrity, verifyChainFully, exportAuditLog } from "./service";
