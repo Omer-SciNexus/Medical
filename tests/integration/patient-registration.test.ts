@@ -8,8 +8,9 @@ import { readFile } from "node:fs/promises";
 import { migrateDatabase } from "../../scripts/migrate";
 import { seedDatabase, seedId, seedIds } from "../../scripts/seed";
 import { encryptSecret } from "../../src/modules/identity/crypto";
-import { AccessDeniedError, PersonAdminError, invitePatientPortal, listPortalLinks } from "../../src/modules/identity/service";
+import { AccessDeniedError, PersonAdminError, invitePatientPortal, resendPatientPortalInvitation, listPortalLinks } from "../../src/modules/identity/service";
 import { acceptInvitation } from "../../src/modules/identity/auth";
+import { AuthenticationError } from "../../src/modules/identity/errors";
 import { resolveSession } from "../../src/modules/identity/sessions";
 import { registerPatient, searchPatients, listPatients, getPatientDetails, correctPatient, listRecentRegistrations, AccessScopeError } from "../../src/modules/scheduling/service";
 import { PatientRegistrationError, PossibleDuplicateError } from "../../src/modules/scheduling/validators";
@@ -224,6 +225,14 @@ describe("linking a portal account", () => {
     await expect(invitePatientPortal(staff(), { patientId: patient.id, email: "second.account@example.test", displayName: "Tek Hesap" }, origin)).rejects.toBeInstanceOf(PersonAdminError);
     const accounts = await owner.query("SELECT count(*)::int AS count FROM users WHERE patient_id = $1", [patient.id]);
     expect(accounts.rows[0].count).toBe(1);
+  });
+  it("replaces the previous link when a new one is issued, instead of being refused as a duplicate", async () => {
+    const patient = await registerPatient(staff(), newPatient("Yenilenen"));
+    const first = await invitePatientPortal(staff(), { patientId: patient.id, email: "yenilenen@example.test", displayName: "Yenilenen" }, origin);
+    const second = await resendPatientPortalInvitation(staff(), { invitationId: first.id }, origin);
+    expect(tokenOf(second.link)).not.toBe(tokenOf(first.link));
+    await expect(acceptInvitation({ token: tokenOf(first.link), password: portalPassword, confirmPassword: portalPassword }, "test")).rejects.toBeInstanceOf(AuthenticationError);
+    await expect(acceptInvitation({ token: tokenOf(second.link), password: portalPassword, confirmPassword: portalPassword }, "test")).resolves.toMatchObject({ kind: "session" });
   });
   it("refuses a patient from another clinic and an address already in use", async () => {
     const other = await owner.query("INSERT INTO clinics (name) VALUES ('Outside Clinic') RETURNING id");
