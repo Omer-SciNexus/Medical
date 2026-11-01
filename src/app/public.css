@@ -261,6 +261,11 @@
 .auth-help p { margin-top: 10px; background: var(--canvas); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; line-height: 1.8; }
 .auth-footer { display: flex; justify-content: center; align-items: center; gap: 7px; padding: 25px 24px 30px; color: var(--ink-600); font-size: 10px; }
 .auth-footer svg { width: 13px; height: 13px; }
+.request-shell { grid-template-columns: 1fr; }
+.request-shell .auth-content { max-width: 520px; }
+.auth-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+textarea.auth-input { min-height: 84px; resize: vertical; font-family: inherit; line-height: 1.6; }
+@media (max-width: 480px) { .auth-field-row { grid-template-columns: 1fr; gap: 18px; } }
 .auth-mobile-brand { display: none; }
 .auth-setup { border: 1px solid var(--line); border-radius: 6px; background: var(--canvas); padding: 18px; }
 .auth-setup h2 { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; }
