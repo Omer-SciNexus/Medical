@@ -105,6 +105,13 @@ export async function listCareProviders(inputActor: Actor) {
   if (!await currentActorIsValid(actor)) throw new AccessDeniedError();
   return listClinicians(actor.clinicId);
 }
+/** For the public request page, before anyone is signed in: the clinic's name and nothing else. */
+export async function describeRequestClinic(clinicId: unknown) {
+  const parsed = z.uuid().safeParse(clinicId);
+  if (!parsed.success) return null;
+  const clinic = await findClinicSettings(parsed.data);
+  return clinic ? { id: clinic.id, name: clinic.name } : null;
+}
 export async function getClinicSettings(inputActor: Actor) {
   const actor = actorSchema.parse(inputActor);
   if (!await currentActorIsValid(actor)) throw new AccessDeniedError();
