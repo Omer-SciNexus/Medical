@@ -8,7 +8,7 @@ import { readFile } from "node:fs/promises";
 import { migrateDatabase } from "../../scripts/migrate";
 import { seedDatabase, seedIds } from "../../scripts/seed";
 import { encryptSecret } from "../../src/modules/identity/crypto";
-import { submitAppointmentRequest, confirmAppointmentRequest, listAppointmentRequests, findRequestMatches, linkAppointmentRequestToPatient, registerAndInviteFromRequest, declineAppointmentRequest, registerPatient, AccessScopeError } from "../../src/modules/scheduling/service";
+import { findRequestClinic, submitAppointmentRequest, confirmAppointmentRequest, listAppointmentRequests, findRequestMatches, linkAppointmentRequestToPatient, registerAndInviteFromRequest, declineAppointmentRequest, registerPatient, AccessScopeError } from "../../src/modules/scheduling/service";
 import { AppointmentRequestError } from "../../src/modules/scheduling/validators";
 import type { Actor } from "../../src/modules/identity/validators";
 
@@ -85,6 +85,30 @@ describe("submitting a request", () => {
     const from = nextAddress();
     for (let i = 0; i < 3; i++) await submitAppointmentRequest(request("Sinir"), from, origin);
     await expect(submitAppointmentRequest(request("Sinir"), nextAddress(), origin)).rejects.toBeInstanceOf(AppointmentRequestError);
+  });
+});
+
+describe("finding a clinic by its code", () => {
+  const seededCode = async () => (await owner.query("SELECT request_code FROM clinics WHERE id = $1", [seedIds.clinic])).rows[0].request_code as string;
+  it("gives every clinic its own eight-character code, including clinics that existed before the column", async () => {
+    await owner.query("INSERT INTO clinics (name) VALUES ('Second clinic'), ('Third clinic')");
+    const codes = (await owner.query("SELECT request_code FROM clinics")).rows.map((row) => row.request_code as string);
+    for (const code of codes) expect(code).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/);
+    expect(new Set(codes).size).toBe(codes.length);
+  });
+  it("forgives case, spaces and the printed hyphen, and returns the name and nothing else", async () => {
+    const code = await seededCode();
+    const typed = ` ${code.slice(0, 4).toLowerCase()}-${code.slice(4)} `;
+    const found = await findRequestClinic(typed, nextAddress());
+    expect(found).toEqual({ status: "found", clinic: { id: seedIds.clinic, name: expect.any(String) } });
+  });
+  it("counts only misses, and once over the limit refuses even the right code", async () => {
+    const code = await seededCode();
+    const from = nextAddress();
+    for (let i = 0; i < 25; i++) expect((await findRequestClinic(code, from)).status).toBe("found");
+    for (let i = 0; i < 20; i++) expect((await findRequestClinic(i % 2 ? "ZZZZZZZZ" : "not a code", from)).status).toBe("not_found");
+    expect((await findRequestClinic(code, from)).status).toBe("limited");
+    expect((await findRequestClinic(code, nextAddress())).status).toBe("found");
   });
 });
 
