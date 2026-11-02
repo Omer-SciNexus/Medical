@@ -42,8 +42,9 @@ export default function Home() {
       <Testimonials />
       <HealthNews />
       <section className="public-container marketing-faq" id="questions"><div><span className="public-eyebrow">A FEW HELPFUL DETAILS</span><h2>Before you begin.</h2></div><div className="marketing-questions">
+        <details><summary>I&rsquo;m a patient. How do I get an appointment?<ChevronDown aria-hidden="true" /></summary><p>Already invited to your clinic&rsquo;s portal? <Link href="/sign-in" prefetch={false}>Sign in</Link> and choose a time. If not, <Link href="/request-appointment" prefetch={false}>request an appointment</Link> with the code or link your clinic gave you. The clinic reviews it and emails you an invitation to the portal, where you book the time yourself.</p></details>
         <details><summary>What can I explore today?<ChevronDown aria-hidden="true" /></summary><p>Follow the sample visit above or explore the design library. Both use fictional data. The development workspace includes booking, clinical notes, and patient summaries; availability depends on your clinic’s configuration.</p></details>
-        <details><summary>Who is a workspace for?<ChevronDown aria-hidden="true" /></summary><p>A new workspace is for a clinic owner or administrator. Already part of a clinic? <Link href="/sign-in" prefetch={false}>Sign in to your existing account</Link> or ask your clinic for an invitation.</p></details>
+        <details><summary>Who is a workspace for?<ChevronDown aria-hidden="true" /></summary><p>A new workspace is for a clinic owner or administrator. Already part of a clinic? <Link href="/sign-in" prefetch={false}>Sign in to your existing account</Link> or ask your clinic for an invitation. Patients don&rsquo;t need a workspace.</p></details>
         <details><summary>Can I try the interface before creating an account?<ChevronDown aria-hidden="true" /></summary><p>Yes. <Link href="/design">Open the design preview</Link> to explore the interface with synthetic sample data. It does not book appointments or change medical records.</p></details>
       </div></section>
     </main><SiteFooter />
