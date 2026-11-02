@@ -9,6 +9,8 @@ export const clinics = pgTable("clinics", {
   name: text("name").notNull(),
   timezone: text("timezone").default("Europe/Istanbul").notNull(),
   currency: text("currency").default("TRY").notNull(),
+  /** What a patient types to reach this clinic's request form; new_request_code() is defined in 0016. */
+  requestCode: text("request_code").default(sql`new_request_code()`).notNull().unique("clinics_request_code_unique"),
 });
 
 export const users = pgTable("users", {
