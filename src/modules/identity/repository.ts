@@ -91,7 +91,11 @@ export async function listClinicians(clinicId: string) {
     .where(and(eq(users.clinicId, clinicId), eq(users.role, "clinician"), eq(users.active, true))).orderBy(asc(users.displayName)).limit(100);
 }
 export async function findClinicSettings(clinicId: string) {
-  const [clinic] = await getDb().select({ id: clinics.id, name: clinics.name, timezone: clinics.timezone, currency: clinics.currency }).from(clinics).where(eq(clinics.id, clinicId)).limit(1);
+  const [clinic] = await getDb().select({ id: clinics.id, name: clinics.name, timezone: clinics.timezone, currency: clinics.currency, requestCode: clinics.requestCode }).from(clinics).where(eq(clinics.id, clinicId)).limit(1);
+  return clinic;
+}
+export async function findClinicByRequestCode(requestCode: string) {
+  const [clinic] = await getDb().select({ id: clinics.id, name: clinics.name }).from(clinics).where(eq(clinics.requestCode, requestCode)).limit(1);
   return clinic;
 }
 export type AuditFilters = { actorId?: string; patientId?: string; action?: string; from?: Date; to?: Date; before?: number; limit: number };

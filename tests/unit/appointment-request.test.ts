@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appointmentRequestSchema, requestTokenSchema } from "../../src/modules/scheduling/validators";
+import { appointmentRequestSchema, formatRequestCode, requestCodeSchema, requestTokenSchema } from "../../src/modules/scheduling/validators";
 
 const valid = { clinicId: "00000000-0000-4000-8000-000000000001", givenName: " Ayse ", surname: "Yilmaz", birthDate: "1990-05-14", contactEmail: " Ayse@Example.TEST ", contactPhone: "", reason: "Recurring headaches", preferredTimes: "" };
 
@@ -23,5 +23,14 @@ describe("an appointment request", () => {
     expect(requestTokenSchema.safeParse("a".repeat(64)).success).toBe(true);
     expect(requestTokenSchema.safeParse("a".repeat(63)).success).toBe(false);
     expect(requestTokenSchema.safeParse("Z".repeat(64)).success).toBe(false);
+  });
+  it("reads a clinic code however it was typed, but only from the code alphabet", () => {
+    expect(requestCodeSchema.parse(" k7m4-qx9p ")).toBe("K7M4QX9P");
+    expect(requestCodeSchema.parse("K7M4 QX9P")).toBe("K7M4QX9P");
+    // 0, O, 1, I and L are left out of codes so they cannot be misread.
+    for (const code of ["K7M4QX9", "K7M4QX9PP", "K7M4QX90", "K7M4QX9O", "K7M4QX9I", "K7M4QX9L", ""]) expect(requestCodeSchema.safeParse(code).success).toBe(false);
+  });
+  it("prints a code in two groups of four", () => {
+    expect(formatRequestCode("K7M4QX9P")).toBe("K7M4-QX9P");
   });
 });

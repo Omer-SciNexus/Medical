@@ -21,9 +21,11 @@ function CopyBox({ label, value }: { label: string; value: string }) {
   </div>;
 }
 
-export function Requests({ clinicId, requests, mailConfigured }: { clinicId: string; requests: PendingRequest[] | null; mailConfigured: boolean }) {
-  const [shareLink, setShareLink] = React.useState("");
-  React.useEffect(() => { setShareLink(`${window.location.origin}/request-appointment?clinic=${clinicId}`); }, [clinicId]);
+// The code link is the one to share; the clinic-id link remains for when the code cannot be read.
+export function Requests({ clinicId, requestCode, requests, mailConfigured }: { clinicId: string; requestCode: string | null; requests: PendingRequest[] | null; mailConfigured: boolean }) {
+  const [origin, setOrigin] = React.useState("");
+  React.useEffect(() => { setOrigin(window.location.origin); }, []);
+  const shareLink = origin && `${origin}/request-appointment?${requestCode ? `code=${requestCode}` : `clinic=${clinicId}`}`;
   const [open, setOpen] = React.useState<string | null>(null);
   const [linkState, link, linkPending] = useActionState(linkRequestAction, idleAction);
   const [registerState, register, registerPending] = useActionState(registerFromRequestAction, idleAction);
@@ -38,6 +40,7 @@ export function Requests({ clinicId, requests, mailConfigured }: { clinicId: str
 
   return <>
     {shareLink ? <CopyBox label="Your clinic's request link. Put it on your website or send it to people who want an appointment:" value={shareLink} /> : null}
+    {shareLink && requestCode ? <p className="field-hint" style={{ marginBottom: 14 }}>Patients can also go to <span className="mono">{origin}/request-appointment</span> and type your clinic code, <strong className="mono">{requestCode}</strong>. It&rsquo;s easier to read out over the phone or print on a card.</p> : null}
     {last.link ? <CopyBox value={last.link} label={[last.notice, last.delivered ? "Portal invitation sent. This link also works directly:"
       : mailConfigured ? "Portal invitation created, but it could not be emailed. Give this link to the patient:" : "Portal invitation created. Give this link to the patient:"].filter(Boolean).join(" ")} /> : null}
     {last.ok && !last.link && last.notice ? <p className="field-hint" role="status" style={{ marginBottom: 14 }}>{last.notice}</p> : null}

@@ -1,14 +1,14 @@
 import "server-only";
 import { z } from "zod";
 import { getClinicSettings, recordScopedEvent, type Actor } from "@/modules/identity";
-import { auditedPatientOperation, describeRequestClinic, digest, invitePatientPortal, listPortalLinks, newToken, PersonAdminError, recordSystemEvent } from "@/modules/identity";
+import { auditedPatientOperation, describeRequestClinic, describeRequestClinicByCode, digest, invitePatientPortal, listPortalLinks, newToken, PersonAdminError, recordSystemEvent } from "@/modules/identity";
 import { getDb, type Transaction } from "@/platform/db";
 import { getRedis } from "@/platform/redis";
 import { exceedsLimit } from "@/platform/rate-limit";
 import { sendMail } from "@/platform/mailer";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { addClinicDays, clinicDayRange, clinicTimezone, todayInZone, weekdayOf, zonedInstant, zonedStartOfDay } from "@/lib/clinic-day";
-import { appointmentRequestIdSchema, appointmentRequestSchema, declineAppointmentRequestSchema, linkAppointmentRequestSchema, requestTokenSchema, AppointmentRequestError } from "./validators";
+import { appointmentRequestIdSchema, appointmentRequestSchema, declineAppointmentRequestSchema, linkAppointmentRequestSchema, requestCodeSchema, requestTokenSchema, AppointmentRequestError } from "./validators";
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
 import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
@@ -363,6 +363,21 @@ export async function submitAppointmentRequest(input: unknown, trustedClientAddr
   // Account mail only: the reason for the visit stays out of the message.
   await sendMail({ to: request.contactEmail, subject: `Confirm your appointment request with ${clinic.name}`,
     text: `${request.givenName},\n\nOpen the link below within 24 hours to send your appointment request to ${clinic.name}. Until you do, the clinic does not receive it.\n\n${origin}/request-appointment/confirm?token=${token}\n\nIf you did not ask for an appointment, ignore this message.` });
+}
+const REQUEST_CODE_MISSES = 20;
+/**
+ * Only a miss counts against the address, so a clinic's shared link never locks its own patients
+ * out, while anyone guessing codes runs out of tries long before finding one. Once over the limit
+ * even a right code is refused, or the limit would not stop the guessing.
+ */
+export async function findRequestClinic(code: unknown, trustedClientAddress: string) {
+  const parsed = requestCodeSchema.safeParse(code);
+  const missKey = `limit:request_code:${digest(trustedClientAddress)}`;
+  if (Number(await getRedis().get(missKey) ?? 0) >= REQUEST_CODE_MISSES) return { status: "limited" as const };
+  const clinic = parsed.success ? await describeRequestClinicByCode(parsed.data) : null;
+  if (clinic) return { status: "found" as const, clinic };
+  await exceedsLimit(missKey, REQUEST_CODE_MISSES);
+  return { status: "not_found" as const };
 }
 /** Single use: the payload is taken and deleted in one step, so a second click finds nothing. */
 export async function confirmAppointmentRequest(token: unknown) {

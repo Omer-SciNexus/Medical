@@ -67,6 +67,11 @@ export const appointmentRequestSchema = patientDetailsSchema.pick({ givenName: t
 });
 export type AppointmentRequestInput = z.infer<typeof appointmentRequestSchema>;
 export const requestTokenSchema = z.string().regex(/^[a-f0-9]{64}$/);
+// Typed by hand, so case, spaces and the hyphen in the printed form (K7M4-QX9P) are forgiven.
+// The alphabet matches new_request_code() in migration 0016.
+export const requestCodeSchema = z.string().transform((value) => value.toUpperCase().replace(/[^A-Z0-9]/g, ""))
+  .pipe(z.string().regex(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/));
+export const formatRequestCode = (code: string) => `${code.slice(0, 4)}-${code.slice(4)}`;
 export const appointmentRequestIdSchema = z.object({ requestId: z.uuid() });
 export const linkAppointmentRequestSchema = appointmentRequestIdSchema.extend({ patientId: z.uuid("Choose a patient.") });
 export const declineAppointmentRequestSchema = appointmentRequestIdSchema.extend({ note: optionalText(200, "Use no more than 200 characters.") });

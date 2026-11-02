@@ -129,7 +129,9 @@ describe("opening appointment times", () => {
 
 describe("blackouts", () => {
   it("withdraws the open times it covers and reports booked ones it will not touch", async () => {
-    const target = (await owner.query("SELECT starts_at FROM availability_slots WHERE provider_id = $1 AND deleted_at IS NULL ORDER BY starts_at LIMIT 1", [provider])).rows[0].starts_at as Date;
+    // The first day with at least two open times, so one can be booked and another withdrawn. The
+    // earliest slot alone is not enough: run late on a session day, it can be that day's last.
+    const target = (await owner.query("SELECT min(starts_at) AS starts_at FROM availability_slots WHERE provider_id = $1 AND deleted_at IS NULL GROUP BY (starts_at AT TIME ZONE $2)::date HAVING count(*) > 1 ORDER BY 1 LIMIT 1", [provider, timeZone])).rows[0].starts_at as Date;
     const day = new Intl.DateTimeFormat("en-CA", { timeZone }).format(target);
     // Book one of that day's slots so the blackout has something it must refuse to remove.
     const booked = (await owner.query("SELECT id FROM availability_slots WHERE provider_id = $1 AND deleted_at IS NULL AND starts_at >= $2 ORDER BY starts_at LIMIT 1", [provider, target])).rows[0].id;

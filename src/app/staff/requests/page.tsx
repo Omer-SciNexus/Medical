@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { ChevronRight, Home, Inbox } from "lucide-react";
 import { AppShell } from "@/components/app/shell";
 import { getClinicSettings } from "@/modules/identity";
-import { listAppointmentRequests } from "@/modules/scheduling";
+import { formatRequestCode, listAppointmentRequests } from "@/modules/scheduling";
 import { patientAge } from "@/modules/clinical";
 import { clinicTimezone } from "@/lib/clinic-day";
 import { mailConfigured } from "@/platform/mailer";
@@ -23,8 +23,8 @@ export default async function RequestsPage() {
     <div className="section-header">
       <div className="section-heading"><div><span className="eyebrow icon-label"><Inbox /> Front desk</span>
         <h2 style={{ marginTop: 6 }}>Appointment requests</h2>
-        <p className="section-description">People who are not yet patients ask for an appointment from your clinic&rsquo;s link. Match each one to an existing record or register them, and they&rsquo;re invited to the portal to choose a time.</p></div></div>
+        <p className="section-description">People who are not yet patients ask for an appointment from your clinic&rsquo;s link or code. Match each one to an existing record or register them, and they&rsquo;re invited to the portal to choose a time.</p></div></div>
     </div>
-    <Requests clinicId={actor.clinicId} requests={requests} mailConfigured={mailConfigured()} />
+    <Requests clinicId={actor.clinicId} requestCode={clinic ? formatRequestCode(clinic.requestCode) : null} requests={requests} mailConfigured={mailConfigured()} />
   </AppShell>;
 }

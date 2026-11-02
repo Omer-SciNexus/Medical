@@ -10,7 +10,7 @@ import { actorSchema, auditFilterSchema, emergencySchema, invitationIdSchema, in
 import { roleAllowsPurpose, hasFreshTotp } from "./policy";
 import { digest, newToken } from "./crypto";
 import { revokeAllSessions } from "./sessions";
-import { appendAudit, clearMfaEnrollment, createEmergencyRelationship, createInvitation, findClinicSettings, findClinicUser, findPortalAccount, findUserByEmail, findUserById, hasCareRelationship, insertCareRelationships, listAuditEvents, listClinicians, listClinicPeople, listInvitations, listLiveRelationships, listPendingPatientInvitations, listPortalAccountsFor, revokeInvitation, revokeRelationship, rotateInvitation, setUserActive, verifyAuditChainFrom, latestCheckpoint, summariseAuditOutcomes, exportAuditEvents } from "./repository";
+import { appendAudit, clearMfaEnrollment, createEmergencyRelationship, createInvitation, findClinicByRequestCode, findClinicSettings, findClinicUser, findPortalAccount, findUserByEmail, findUserById, hasCareRelationship, insertCareRelationships, listAuditEvents, listClinicians, listClinicPeople, listInvitations, listLiveRelationships, listPendingPatientInvitations, listPortalAccountsFor, revokeInvitation, revokeRelationship, rotateInvitation, setUserActive, verifyAuditChainFrom, latestCheckpoint, summariseAuditOutcomes, exportAuditEvents } from "./repository";
 
 export class AccessDeniedError extends Error {
   constructor() { super("You do not have permission to access this record."); this.name = "AccessDeniedError"; }
@@ -111,6 +111,10 @@ export async function describeRequestClinic(clinicId: unknown) {
   if (!parsed.success) return null;
   const clinic = await findClinicSettings(parsed.data);
   return clinic ? { id: clinic.id, name: clinic.name } : null;
+}
+/** The same, reached by the short code a patient types; the caller has already normalised it. */
+export async function describeRequestClinicByCode(requestCode: string) {
+  return await findClinicByRequestCode(requestCode) ?? null;
 }
 export async function getClinicSettings(inputActor: Actor) {
   const actor = actorSchema.parse(inputActor);

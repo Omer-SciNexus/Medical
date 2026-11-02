@@ -5,10 +5,11 @@ import { Brand } from "./brand";
 const groups = [
   { title: "Discover", links: [{ href: "#platform", label: "The platform" }, { href: "#experience", label: "Patient experience" }, { href: "#security", label: "Trust & access" }, { href: "#news", label: "Health news" }, { href: "#testimonials", label: "Testimonials preview" }, { href: "#questions", label: "Common questions" }] },
   { title: "Get started", links: [{ href: "/design", label: "Explore the preview" }, { href: "/sign-up", label: "Create a workspace" }, { href: "/sign-in", label: "Sign in" }, { href: "/forgot-password", label: "Account recovery" }] },
+  { title: "For patients", links: [{ href: "/request-appointment", label: "Request an appointment" }, { href: "/sign-in", label: "Patient portal sign-in" }] },
 ];
 // The account pages always render dynamically. A click that lands while Next.js is still prefetching one
 // can fetch the page and never commit the navigation, so links to them skip prefetching.
-const accountPages = new Set(["/sign-up", "/sign-in", "/forgot-password"]);
+const accountPages = new Set(["/sign-up", "/sign-in", "/forgot-password", "/request-appointment"]);
 
 export function SiteFooter() {
   return <footer className="site-footer">
