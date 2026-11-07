@@ -85,6 +85,9 @@ export const followUpPlanSchema = z.object({
   followUpDays: z.union([z.literal(""), z.coerce.number().refine((days) => FOLLOW_UP_INTERVALS.some((interval) => interval.days === days), "Choose when to see them again.")]).optional(),
   followUpNote: optionalText(140, "Use no more than 140 characters."),
 }).refine((plan) => Boolean(plan.followUpDays) || !plan.followUpNote, { path: ["followUpDays"], message: "Choose when to see them again, or remove the note." });
+export const followUpIdSchema = z.object({ followUpId: z.uuid() });
+export const FOLLOW_UP_CLOSE_REASONS = ["Seen elsewhere", "Patient declined", "No longer needed"] as const;
+export const closeFollowUpSchema = followUpIdSchema.extend({ reason: z.enum(FOLLOW_UP_CLOSE_REASONS, { error: "Choose why this follow-up is closing." }) });
 
 export class PatientRegistrationError extends Error {
   constructor(message: string) { super(message); this.name = "PatientRegistrationError"; }
