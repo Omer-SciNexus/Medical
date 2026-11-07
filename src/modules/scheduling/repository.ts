@@ -96,11 +96,20 @@ export async function listFollowUpWorklist(clinicId: string) {
     .where(and(eq(followUps.clinicId, clinicId), eq(followUps.status, "pending"), isNull(followUps.deletedAt), isNull(patients.deletedAt)))
     .orderBy(asc(followUps.dueOn), asc(followUps.id)).limit(100);
 }
+export async function findFollowUp(clinicId: string, followUpId: string) {
+  const [followUp] = await getDb().select({ id: followUps.id, clinicId: followUps.clinicId, patientId: followUps.patientId, dueOn: followUps.dueOn, status: followUps.status, remindedAt: followUps.remindedAt }).from(followUps)
+    .where(and(eq(followUps.id, followUpId), eq(followUps.clinicId, clinicId), isNull(followUps.deletedAt))).limit(1);
+  return followUp;
+}
 export async function closeFollowUpRow(actor: Actor, followUpId: string, reason: string) {
   const [followUp] = await getDb().update(followUps).set({ status: "closed", closedReason: reason, updatedBy: actor.id })
     .where(and(eq(followUps.id, followUpId), eq(followUps.clinicId, actor.clinicId), eq(followUps.status, "pending"), isNull(followUps.deletedAt)))
     .returning({ id: followUps.id, patientId: followUps.patientId });
   return followUp;
+}
+/** A reminder asked for by the front desk goes through the same worker as a scheduled one. */
+export async function requestFollowUpReminder(actor: Actor, followUpId: string, day: string) {
+  await getDb().transaction((tx) => enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "follow_up.remind", resourceId: followUpId, uniqueBy: `follow_up.remind:${followUpId}:${day}` }));
 }
 export async function listPatientAppointments(actor: Actor, patientId: string, page?: { view: "upcoming" | "past"; number: number; at: Date }) {
   const upcoming = sql`${availabilitySlots.startsAt} > ${page?.at.toISOString() ?? new Date().toISOString()}::timestamptz AND ${appointments.status} NOT IN ('cancelled', 'done', 'no_show')`;

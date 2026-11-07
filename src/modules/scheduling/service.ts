@@ -12,8 +12,8 @@ import { appointmentRequestIdSchema, appointmentRequestSchema, declineAppointmen
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
 import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
-import { closeFollowUpSchema, FollowUpError } from "./validators";
-import { closeFollowUpRow, insertFollowUp, listFollowUpWorklist, listPatientFollowUps } from "./repository";
+import { closeFollowUpSchema, followUpIdSchema, FollowUpError } from "./validators";
+import { closeFollowUpRow, findFollowUp, insertFollowUp, listFollowUpWorklist, listPatientFollowUps, requestFollowUpReminder } from "./repository";
 import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
@@ -374,6 +374,18 @@ export async function closeFollowUp(actor: Actor, input: unknown) {
   const closed = await closeFollowUpRow(actor, followUpId, reason);
   if (!closed) throw new FollowUpError("This follow-up has already been booked or closed.");
   await recordScopedEvent(actor, { action: "scheduling.follow_up_closed", purpose: "scheduling", patientId: closed.patientId, resourceId: followUpId, reason });
+}
+const REMIND_AGAIN_MS = 24 * 3_600_000;
+/** At most once a day: a person's inbox is not the place to work through a list. */
+export async function sendFollowUpReminderNow(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { followUpId } = followUpIdSchema.parse(input);
+  const followUp = await findFollowUp(actor.clinicId, followUpId);
+  if (!followUp || followUp.status !== "pending") throw new FollowUpError("This follow-up has already been booked or closed.");
+  if (followUp.remindedAt && Date.now() - followUp.remindedAt.getTime() < REMIND_AGAIN_MS) throw new FollowUpError("A reminder went out in the last 24 hours. Try again tomorrow.");
+  const timeZone = (await getClinicSettings(actor))?.timezone ?? clinicTimezone();
+  await requestFollowUpReminder(actor, followUpId, todayInZone(timeZone));
+  await recordScopedEvent(actor, { action: "scheduling.follow_up_reminder_requested", purpose: "scheduling", patientId: followUp.patientId, resourceId: followUpId });
 }
 
 const REQUEST_CONFIRM_SECONDS = 24 * 60 * 60;
