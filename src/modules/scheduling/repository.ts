@@ -4,8 +4,8 @@ import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, grantWorkflowAccess, type Actor } from "@/modules/identity";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { enqueueOutbox } from "@/platform/outbox";
-import { appointmentRequests, appointments, availabilitySlots, availabilityTemplates, followUps, patients, scheduleBlackouts } from "./schema";
-import { SlotUnavailableError, StaleAppointmentError, type AppointmentRequestInput, type AppointmentStatus } from "./validators";
+import { appointmentRequests, appointments, availabilitySlots, availabilityTemplates, followUps, patients, scheduleBlackouts, waitlistEntries } from "./schema";
+import { SlotUnavailableError, StaleAppointmentError, WaitlistError, type AppointmentRequestInput, type AppointmentStatus } from "./validators";
 
 // Authorization metadata only. Never return clinical or demographic fields here.
 export async function patientIsInClinic(clinicId: string, patientId: string, tx?: Transaction) {
@@ -74,6 +74,19 @@ export async function moveAppointmentToSlot(actor: Actor, input: { appointmentId
     return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "scheduling", "scheduling.appointment_rescheduled", () => applyMove(tx, actor, input)));
   } catch (error) {
     if (isUniqueViolation(error)) throw new SlotUnavailableError();
+    throw error;
+  }
+}
+
+export async function insertWaitlistEntry(actor: Actor, patientId: string, input: { providerId: string; reason: string; appointmentId?: string }) {
+  try {
+    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.waitlist_joined", async () => {
+      const [entry] = await tx.insert(waitlistEntries).values({ clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id, patientId, providerId: input.providerId, reason: input.reason, appointmentId: input.appointmentId ?? null })
+        .returning({ id: waitlistEntries.id });
+      return entry;
+    }));
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new WaitlistError("You are already on the waiting list for this clinician.");
     throw error;
   }
 }
