@@ -5,6 +5,6 @@ export { reschedulePatientAppointment, listMyAppointmentOptions } from "./servic
 export { getWaitingRoomBoard, getClinicReport } from "./service";
 export { findRequestClinic, submitAppointmentRequest, confirmAppointmentRequest, listAppointmentRequests, findRequestMatches, linkAppointmentRequestToPatient, registerAndInviteFromRequest, declineAppointmentRequest } from "./service";
 export { findReminderTarget, listReminderWindow } from "./repository";
-export { SlotUnavailableError, StaleAppointmentError, ScheduleAuthoringError, PatientRegistrationError, PossibleDuplicateError, AppointmentRequestError, appointmentRequestSchema, formatRequestCode, appointmentStatusSchema, bookingSchema, transitionSchema } from "./validators";
+export { SlotUnavailableError, StaleAppointmentError, ScheduleAuthoringError, PatientRegistrationError, PossibleDuplicateError, AppointmentRequestError, appointmentRequestSchema, formatRequestCode, appointmentStatusSchema, bookingSchema, transitionSchema, followUpPlanSchema, FOLLOW_UP_INTERVALS } from "./validators";
 export { waitingMinutes, canTransition, roleMayTransition } from "./policy";
 export type { AppointmentStatus } from "./validators";
