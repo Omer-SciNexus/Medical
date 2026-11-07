@@ -38,9 +38,11 @@ async function insertBooking(tx: Transaction, actor: Actor, patientId: string, i
   await grantWorkflowAccess(tx, { clinicId: actor.clinicId, actorId: input.providerId, patientId, purposes: ["scheduling"], grantedBy: actor.id, reason: "Appointment booked with this provider" });
   // Reminders are scheduled by a worker reading this row, not inside the booking request.
   await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.booked", resourceId: appointment.id });
-  // Seeing this clinician is what a follow-up asked for.
+  // Seeing this clinician is what a follow-up asked for, and what a first-time wait was for.
   await tx.update(followUps).set({ status: "booked", appointmentId: appointment.id, updatedBy: actor.id })
     .where(and(eq(followUps.clinicId, actor.clinicId), eq(followUps.patientId, patientId), eq(followUps.providerId, input.providerId), eq(followUps.status, "pending"), isNull(followUps.deletedAt)));
+  await tx.update(waitlistEntries).set({ status: "booked", updatedBy: actor.id })
+    .where(and(eq(waitlistEntries.clinicId, actor.clinicId), eq(waitlistEntries.patientId, patientId), eq(waitlistEntries.providerId, input.providerId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.appointmentId), isNull(waitlistEntries.deletedAt)));
   return appointment;
 }
 export async function claimSlot(actor: Actor, patientId: string, input: { slotId: string; providerId: string; reason: string }) {
