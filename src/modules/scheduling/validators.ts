@@ -89,6 +89,14 @@ export const followUpIdSchema = z.object({ followUpId: z.uuid() });
 export const FOLLOW_UP_CLOSE_REASONS = ["Seen elsewhere", "Patient declined", "No longer needed"] as const;
 export const closeFollowUpSchema = followUpIdSchema.extend({ reason: z.enum(FOLLOW_UP_CLOSE_REASONS, { error: "Choose why this follow-up is closing." }) });
 
+export const joinWaitlistSchema = z.object({
+  providerId: z.uuid(),
+  reason: bookingSchema.shape.reason.optional(),
+  appointmentId: z.uuid().optional(),
+}).refine((request) => request.appointmentId || request.reason, { path: ["reason"], message: "Describe the reason for your visit." });
+export const waitlistEntryIdSchema = z.object({ entryId: z.uuid() });
+export const waitlistOfferIdSchema = z.object({ offerId: z.uuid() });
+
 export class FollowUpError extends Error {
   constructor(message: string) { super(message); this.name = "FollowUpError"; }
 }
