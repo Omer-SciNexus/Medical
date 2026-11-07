@@ -114,6 +114,9 @@ export async function closeFollowUpRow(actor: Actor, followUpId: string, reason:
 export async function requestFollowUpReminder(actor: Actor, followUpId: string, day: string) {
   await getDb().transaction((tx) => enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "follow_up.remind", resourceId: followUpId, uniqueBy: `follow_up.remind:${followUpId}:${day}` }));
 }
+export async function markFollowUpReminded(clinicId: string, followUpId: string) {
+  await getDb().update(followUps).set({ remindedAt: new Date() }).where(and(eq(followUps.id, followUpId), eq(followUps.clinicId, clinicId)));
+}
 export async function listPatientAppointments(actor: Actor, patientId: string, page?: { view: "upcoming" | "past"; number: number; at: Date }) {
   const upcoming = sql`${availabilitySlots.startsAt} > ${page?.at.toISOString() ?? new Date().toISOString()}::timestamptz AND ${appointments.status} NOT IN ('cancelled', 'done', 'no_show')`;
   return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.appointments_read", () =>
