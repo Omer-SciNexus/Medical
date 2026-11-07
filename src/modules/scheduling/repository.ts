@@ -246,6 +246,9 @@ export async function transitionAppointment(actor: Actor, input: { appointmentId
     if (!updated) throw new StaleAppointmentError();
     if (input.status === "cancelled" || input.status === "no_show") {
       await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.cancelled", resourceId: input.appointmentId });
+      // The visit a follow-up was waiting on is not going to happen, so it needs booking again.
+      await tx.update(followUps).set({ status: "pending", appointmentId: null, updatedBy: actor.id })
+        .where(and(eq(followUps.clinicId, actor.clinicId), eq(followUps.appointmentId, input.appointmentId), eq(followUps.status, "booked")));
     }
     // Arrival is when the chart opens. Authority to read, document and prescribe begins with
     // the patient physically here, commits with the check-in itself, and stays revocable.
