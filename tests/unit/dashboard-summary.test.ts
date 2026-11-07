@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Actor } from "../../src/modules/identity";
 
-const services = vi.hoisted(() => ({ listPeople: vi.fn(), getScheduleAuthoring: vi.fn(), listMyAppointments: vi.fn(), listMyVisits: vi.fn(), getClinicianQueue: vi.fn(), getWaitingRoomBoard: vi.fn() }));
+const services = vi.hoisted(() => ({ listPeople: vi.fn(), getScheduleAuthoring: vi.fn(), listMyAppointments: vi.fn(), listMyVisits: vi.fn(), getClinicianQueue: vi.fn(), getWaitingRoomBoard: vi.fn(), listMyFollowUps: vi.fn() }));
 vi.mock("@/modules/identity", () => ({ listPeople: services.listPeople }));
 vi.mock("@/modules/scheduling", () => services);
 vi.mock("@/modules/clinical", () => ({ listMyVisits: services.listMyVisits }));
@@ -10,9 +10,23 @@ import { readDashboardSummary } from "../../src/app/dashboard/summary";
 const now = new Date("2026-10-26T06:00:00Z");
 const actor = (role: Actor["role"]): Actor => ({ id: "account-1", clinicId: "clinic-1", role, patientId: role === "patient" ? "patient-1" : null, mfaVerified: true, authenticatedAt: now.getTime(), mfaVerifiedAt: now.getTime() });
 const appointment = (id: string, status: string, startsAt = "2026-10-26T07:00:00Z") => ({ id, status, startsAt: new Date(startsAt), endsAt: new Date(new Date(startsAt).getTime() + 1_200_000), waitingMinutes: null });
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  services.listMyFollowUps.mockResolvedValue([]);
+});
 
 describe("dashboard overview data", () => {
+  it("puts a follow-up before the next visit for a patient", async () => {
+    const visit = appointment("next", "booked");
+    services.listMyAppointments.mockResolvedValue([visit]);
+    services.listMyVisits.mockResolvedValue([]);
+    expect((await readDashboardSummary(actor("patient"), "Europe/Istanbul", now)).focus.title).toBe("Your next visit, in view.");
+    services.listMyFollowUps.mockResolvedValue([{ id: "f", providerId: "dr", dueOn: "2026-12-01", note: "Private note" }]);
+    const followUp = await readDashboardSummary(actor("patient"), "Europe/Istanbul", now);
+    expect(followUp.focus).toMatchObject({ title: "Time to book your follow-up.", href: "/patient/appointments" });
+    expect(followUp.focus.description).toContain("1 December 2026");
+    expect(followUp.focus.description).not.toContain("Private note");
+  });
   it("counts only active team members and valid pending invitations, and orders weekly sessions from Monday", async () => {
     services.listPeople.mockResolvedValue({ people: [{ id: "dr-1", displayName: "Example Clinician", role: "clinician", active: true }, { role: "admin", active: true }, { role: "patient", active: true }, { role: "staff", active: false }], invitations: [
       { expiresAt: new Date("2026-10-27"), consumedAt: null, revokedAt: null },
