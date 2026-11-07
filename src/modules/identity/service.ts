@@ -116,6 +116,11 @@ export async function describeRequestClinic(clinicId: unknown) {
 export async function describeRequestClinicByCode(requestCode: string) {
   return await findClinicByRequestCode(requestCode) ?? null;
 }
+/** For mail the worker sends with no person signed in: how to name the clinic and tell its time. */
+export async function describeNotificationClinic(clinicId: string) {
+  const clinic = await findClinicSettings(z.uuid().parse(clinicId));
+  return clinic ? { name: clinic.name, timezone: clinic.timezone } : null;
+}
 export async function getClinicSettings(inputActor: Actor) {
   const actor = actorSchema.parse(inputActor);
   if (!await currentActorIsValid(actor)) throw new AccessDeniedError();
