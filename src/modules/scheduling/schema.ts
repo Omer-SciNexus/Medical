@@ -115,3 +115,15 @@ export const waitlistEntries = pgTable("waitlist_entries", {
 }, (t) => [uniqueIndex("waitlist_entries_clinic_id_unique").on(t.clinicId, t.id),
   uniqueIndex("waitlist_one_active").on(t.clinicId, t.patientId, t.providerId).where(sql`${t.status} = 'waiting' AND ${t.deletedAt} IS NULL`),
   index("waitlist_queue").on(t.clinicId, t.providerId, t.status, t.createdAt), index("waitlist_appointment").on(t.appointmentId)]);
+
+// A freed time offered to someone waiting. The time is not held: an offer is live while the slot
+// is free and ahead, and active_slot_booking decides who gets it, so the first to accept wins.
+// Written by whichever request freed the slot, so created_by/updated_by do not apply.
+export const waitlistOffers = pgTable("waitlist_offers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  clinicId: uuid("clinic_id").notNull(),
+  entryId: uuid("entry_id").notNull(),
+  slotId: uuid("slot_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("waitlist_offer_once").on(t.entryId, t.slotId), index("waitlist_offer_report").on(t.clinicId, t.acceptedAt), index("waitlist_offer_slot").on(t.slotId)]);
