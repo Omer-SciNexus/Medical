@@ -13,7 +13,7 @@ import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchem
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
 import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
 import { closeFollowUpSchema, followUpIdSchema, FollowUpError, joinWaitlistSchema, WaitlistError, waitlistEntryIdSchema } from "./validators";
-import { closeFollowUpRow, findFollowUp, insertFollowUp, insertWaitlistEntry, leaveWaitlistEntry, listFollowUpWorklist, listPatientFollowUps, requestFollowUpReminder } from "./repository";
+import { closeFollowUpRow, findFollowUp, insertFollowUp, insertWaitlistEntry, leaveWaitlistEntry, listFollowUpWorklist, listPatientFollowUps, listPatientWaitlist, requestFollowUpReminder } from "./repository";
 import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
@@ -407,6 +407,9 @@ export async function joinWaitlist(actor: Actor, input: unknown) {
 export async function leaveWaitlist(actor: Actor, input: unknown) {
   const { entryId } = waitlistEntryIdSchema.parse(input);
   if (!await leaveWaitlistEntry(actor, ownPatientId(actor), entryId)) throw new WaitlistError("You are no longer on that waiting list.");
+}
+export async function listMyWaitlist(actor: Actor) {
+  return listPatientWaitlist(actor, ownPatientId(actor));
 }
 
 const REQUEST_CONFIRM_SECONDS = 24 * 60 * 60;

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gt, gte, isNull, lt, lte, ne, notExists, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, notExists, or, sql } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, grantWorkflowAccess, type Actor } from "@/modules/identity";
@@ -133,6 +133,20 @@ export async function leaveWaitlistEntry(actor: Actor, patientId: string, entryI
       .where(and(eq(waitlistEntries.id, entryId), eq(waitlistEntries.clinicId, actor.clinicId), eq(waitlistEntries.patientId, patientId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt)))
       .returning({ id: waitlistEntries.id });
     return entry;
+  }));
+}
+/** A patient's own place in line, with any offer they could still take. */
+export async function listPatientWaitlist(actor: Actor, patientId: string) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.waitlist_read", async () => {
+    const entries = await tx.select({ id: waitlistEntries.id, providerId: waitlistEntries.providerId, appointmentId: waitlistEntries.appointmentId, reason: waitlistEntries.reason, createdAt: waitlistEntries.createdAt })
+      .from(waitlistEntries).where(and(eq(waitlistEntries.clinicId, actor.clinicId), eq(waitlistEntries.patientId, patientId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt)))
+      .orderBy(asc(waitlistEntries.createdAt)).limit(50);
+    if (!entries.length) return { entries, offers: [] };
+    const offers = await tx.select({ id: waitlistOffers.id, entryId: waitlistOffers.entryId, slotId: waitlistOffers.slotId, providerId: availabilitySlots.providerId, startsAt: availabilitySlots.startsAt, endsAt: availabilitySlots.endsAt })
+      .from(waitlistOffers).innerJoin(availabilitySlots, and(eq(availabilitySlots.id, waitlistOffers.slotId), eq(availabilitySlots.clinicId, waitlistOffers.clinicId)))
+      .where(and(inArray(waitlistOffers.entryId, entries.map((entry) => entry.id)), isNull(availabilitySlots.deletedAt), gt(availabilitySlots.startsAt, new Date()), slotIsFree(availabilitySlots.id)))
+      .orderBy(asc(availabilitySlots.startsAt)).limit(20);
+    return { entries, offers };
   }));
 }
 /** System-level read for the offer mail: nothing clinical, and nothing if the offer has lapsed. */
