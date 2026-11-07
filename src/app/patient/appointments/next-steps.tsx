@@ -2,20 +2,38 @@
 
 import { useActionState } from "react";
 import Link from "next/link";
-import { CalendarClock, CalendarPlus, Hourglass, Loader2, X } from "lucide-react";
+import { CalendarClock, CalendarPlus, Check, Hourglass, Loader2, Sparkles, X } from "lucide-react";
 import { Badge, Button } from "@/components/ui/primitives";
 import { idleAction } from "@/lib/action-state";
-import { leaveWaitlistAction } from "@/app/patient/actions";
+import { acceptOfferAction, leaveWaitlistAction } from "@/app/patient/actions";
 
+export type OpenOffer = { id: string; providerName: string; day: string; time: string; movesVisit: boolean };
 export type PlannedFollowUp = { id: string; providerId: string; providerName: string; due: string; overdue: boolean; note: string | null };
 export type WaitingPlace = { id: string; providerName: string; reason: string; movesVisit: boolean };
 
 /** Everything the clinic is waiting on this patient for, above the list of what is already booked. */
-export function NextSteps({ followUps, waiting }: { followUps: PlannedFollowUp[]; waiting: WaitingPlace[] }) {
+export function NextSteps({ offers, followUps, waiting }: { offers: OpenOffer[]; followUps: PlannedFollowUp[]; waiting: WaitingPlace[] }) {
+  const [acceptState, accept, acceptPending] = useActionState(acceptOfferAction, idleAction);
   const [leaveState, leave, leavePending] = useActionState(leaveWaitlistAction, idleAction);
-  const error = leaveState.error;
+  const error = acceptState.error ?? leaveState.error;
   return <>
     {error ? <p className="field-error" role="alert" style={{ marginBottom: 14 }}>{error}</p> : null}
+    {acceptState.ok && acceptState.notice ? <div className="booking-confirmed" role="status" style={{ marginTop: 0, marginBottom: 18 }}><Check /><div><strong>{acceptState.notice}</strong></div></div> : null}
+
+    {offers.length ? <section className="section">
+      <div className="section-header"><div className="section-heading"><div>
+        <span className="eyebrow icon-label"><Sparkles /> Good news</span>
+        <h2 style={{ marginTop: 6 }}>A time has opened up</h2>
+        <p className="section-description">Someone else&rsquo;s plans changed. Each time goes to the first person to accept it.</p></div></div></div>
+      <ul className="appointment-list">{offers.map((offer) => <li key={offer.id}>
+        <div className="appointment-head">
+          <div><strong>{offer.day} at {offer.time}</strong>
+            <p className="appointment-meta">{offer.providerName}{offer.movesVisit ? " · This replaces your later visit, and frees that time for someone else." : ""}</p></div>
+          <form action={accept}><input type="hidden" name="offerId" value={offer.id} />
+            <Button type="submit" size="small" disabled={acceptPending}>{acceptPending ? <Loader2 /> : <Check />}Take this time</Button></form>
+        </div>
+      </li>)}</ul>
+    </section> : null}
 
     {followUps.length ? <section className="section">
       <div className="section-header"><div className="section-heading"><div>

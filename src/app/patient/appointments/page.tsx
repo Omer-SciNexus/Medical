@@ -25,6 +25,8 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     const [clinic, providers, result, followUps, waitlist] = await Promise.all([getClinicSettings(actor), listCareProviders(actor), listMyAppointmentPage(actor, { view, number: page }), listMyFollowUps(actor), listMyWaitlist(actor)]);
     const nameOf = (providerId: string) => providers.find((provider) => provider.id === providerId)?.displayName ?? "Your clinician";
     const today = todayInZone(timeZone);
+    const offerDay = new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "long", day: "numeric", month: "long" });
+    const offerTime = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
     const dueDay = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" });
     const appointments = result.entries;
     const moving = appointments.find((appointment) => appointment.id === move && appointment.status === "booked") ?? null;
@@ -41,6 +43,8 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
         <Link href="/patient/appointments?view=past" aria-current={view === "past" ? "page" : undefined}>Past and cancelled</Link>
       </nav>
       <NextSteps
+        offers={waitlist.offers.map((offer) => ({ id: offer.id, providerName: nameOf(offer.providerId), day: offerDay.format(offer.startsAt), time: offerTime.format(offer.startsAt),
+          movesVisit: waitlist.entries.some((entry) => entry.id === offer.entryId && entry.appointmentId !== null) }))}
         followUps={followUps.map((followUp) => ({ id: followUp.id, providerId: followUp.providerId, providerName: nameOf(followUp.providerId), due: dueDay.format(new Date(`${followUp.dueOn}T12:00:00Z`)), overdue: followUp.dueOn < today, note: followUp.note }))}
         waiting={waitlist.entries.map((entry) => ({ id: entry.id, providerName: nameOf(entry.providerId), reason: entry.reason, movesVisit: entry.appointmentId !== null }))}
       />
