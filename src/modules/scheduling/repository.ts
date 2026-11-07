@@ -25,22 +25,23 @@ export async function findSlot(clinicId: string, slotId: string, providerId: str
     .where(and(eq(availabilitySlots.id, slotId), eq(availabilitySlots.clinicId, clinicId), eq(availabilitySlots.providerId, providerId), isNull(availabilitySlots.deletedAt))).limit(1);
   return slot;
 }
+async function insertBooking(tx: Transaction, actor: Actor, patientId: string, input: { slotId: string; providerId: string; reason: string }) {
+  // Lock the slot row first so concurrent bookings queue here rather than racing the insert.
+  const [slot] = await tx.select({ id: availabilitySlots.id, startsAt: availabilitySlots.startsAt }).from(availabilitySlots)
+    .where(and(eq(availabilitySlots.id, input.slotId), eq(availabilitySlots.clinicId, actor.clinicId), eq(availabilitySlots.providerId, input.providerId), isNull(availabilitySlots.deletedAt))).for("update").limit(1);
+  if (!slot || slot.startsAt.getTime() <= Date.now()) throw new SlotUnavailableError();
+  const [appointment] = await tx.insert(appointments).values({ clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id, patientId, slotId: input.slotId, reason: input.reason,
+    preparation: "Bring your current medication list and any recent test results." }).returning({ id: appointments.id });
+  // Booking is what gives the provider scheduling authority over this patient. Without it
+  // the patient would appear in a queue whose owner is then denied every read.
+  await grantWorkflowAccess(tx, { clinicId: actor.clinicId, actorId: input.providerId, patientId, purposes: ["scheduling"], grantedBy: actor.id, reason: "Appointment booked with this provider" });
+  // Reminders are scheduled by a worker reading this row, not inside the booking request.
+  await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.booked", resourceId: appointment.id });
+  return appointment;
+}
 export async function claimSlot(actor: Actor, patientId: string, input: { slotId: string; providerId: string; reason: string }) {
   try {
-    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.appointment_booked", async () => {
-      // Lock the slot row first so concurrent bookings queue here rather than racing the insert.
-      const [slot] = await tx.select({ id: availabilitySlots.id, startsAt: availabilitySlots.startsAt }).from(availabilitySlots)
-        .where(and(eq(availabilitySlots.id, input.slotId), eq(availabilitySlots.clinicId, actor.clinicId), eq(availabilitySlots.providerId, input.providerId), isNull(availabilitySlots.deletedAt))).for("update").limit(1);
-      if (!slot || slot.startsAt.getTime() <= Date.now()) throw new SlotUnavailableError();
-      const [appointment] = await tx.insert(appointments).values({ clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id, patientId, slotId: input.slotId, reason: input.reason,
-        preparation: "Bring your current medication list and any recent test results." }).returning({ id: appointments.id });
-      // Booking is what gives the provider scheduling authority over this patient. Without it
-      // the patient would appear in a queue whose owner is then denied every read.
-      await grantWorkflowAccess(tx, { clinicId: actor.clinicId, actorId: input.providerId, patientId, purposes: ["scheduling"], grantedBy: actor.id, reason: "Appointment booked with this provider" });
-      // Reminders are scheduled by a worker reading this row, not inside the booking request.
-      await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.booked", resourceId: appointment.id });
-      return appointment;
-    }));
+    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.appointment_booked", () => insertBooking(tx, actor, patientId, input)));
   } catch (error) {
     // The partial unique index is the real guarantee; the row lock only reduces contention.
     if (isUniqueViolation(error)) throw new SlotUnavailableError();
