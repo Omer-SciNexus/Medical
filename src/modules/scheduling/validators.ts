@@ -97,6 +97,9 @@ export const joinWaitlistSchema = z.object({
 export const waitlistEntryIdSchema = z.object({ entryId: z.uuid() });
 export const waitlistOfferIdSchema = z.object({ offerId: z.uuid() });
 
+export class WaitlistError extends Error {
+  constructor(message: string) { super(message); this.name = "WaitlistError"; }
+}
 export class FollowUpError extends Error {
   constructor(message: string) { super(message); this.name = "FollowUpError"; }
 }
