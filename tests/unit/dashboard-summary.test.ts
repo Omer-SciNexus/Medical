@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Actor } from "../../src/modules/identity";
 
-const services = vi.hoisted(() => ({ listPeople: vi.fn(), getScheduleAuthoring: vi.fn(), listMyAppointments: vi.fn(), listMyVisits: vi.fn(), getClinicianQueue: vi.fn(), getWaitingRoomBoard: vi.fn(), listMyFollowUps: vi.fn() }));
+const services = vi.hoisted(() => ({ listPeople: vi.fn(), getScheduleAuthoring: vi.fn(), listMyAppointments: vi.fn(), listMyVisits: vi.fn(), getClinicianQueue: vi.fn(), getWaitingRoomBoard: vi.fn(), listMyFollowUps: vi.fn(), listMyWaitlist: vi.fn() }));
 vi.mock("@/modules/identity", () => ({ listPeople: services.listPeople }));
 vi.mock("@/modules/scheduling", () => services);
 vi.mock("@/modules/clinical", () => ({ listMyVisits: services.listMyVisits }));
@@ -13,10 +13,11 @@ const appointment = (id: string, status: string, startsAt = "2026-10-26T07:00:00
 beforeEach(() => {
   vi.resetAllMocks();
   services.listMyFollowUps.mockResolvedValue([]);
+  services.listMyWaitlist.mockResolvedValue({ entries: [], offers: [] });
 });
 
 describe("dashboard overview data", () => {
-  it("puts a follow-up before the next visit for a patient", async () => {
+  it("puts a freed time first for a patient, then a follow-up, then their next visit", async () => {
     const visit = appointment("next", "booked");
     services.listMyAppointments.mockResolvedValue([visit]);
     services.listMyVisits.mockResolvedValue([]);
@@ -26,6 +27,8 @@ describe("dashboard overview data", () => {
     expect(followUp.focus).toMatchObject({ title: "Time to book your follow-up.", href: "/patient/appointments" });
     expect(followUp.focus.description).toContain("1 December 2026");
     expect(followUp.focus.description).not.toContain("Private note");
+    services.listMyWaitlist.mockResolvedValue({ entries: [], offers: [{ id: "o", startsAt: new Date("2026-10-27T07:00:00Z") }] });
+    expect((await readDashboardSummary(actor("patient"), "Europe/Istanbul", now)).focus.title).toBe("A time has opened up.");
   });
   it("counts only active team members and valid pending invitations, and orders weekly sessions from Monday", async () => {
     services.listPeople.mockResolvedValue({ people: [{ id: "dr-1", displayName: "Example Clinician", role: "clinician", active: true }, { role: "admin", active: true }, { role: "patient", active: true }, { role: "staff", active: false }], invitations: [
