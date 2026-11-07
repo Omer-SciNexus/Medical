@@ -8,9 +8,10 @@ import { readFile } from "node:fs/promises";
 import { migrateDatabase } from "../../scripts/migrate";
 import { seedDatabase, seedId, seedIds } from "../../scripts/seed";
 import { encryptSecret } from "../../src/modules/identity/crypto";
+import { AccessDeniedError, getMyRecordAccess, requestBreakGlass } from "../../src/modules/identity/service";
 import { AccessScopeError, acceptWaitlistOffer, advanceAppointment, bookAppointment, closeFollowUp, getClinicReport, getFollowUpWorklist, joinWaitlist, leaveWaitlist, listMyFollowUps, listMyWaitlist, listProviderAvailability, reschedulePatientAppointment, sendFollowUpReminderNow } from "../../src/modules/scheduling/service";
 import { FollowUpError, SlotUnavailableError, WaitlistError } from "../../src/modules/scheduling/validators";
-import { finishEncounter, signNote, startEncounter } from "../../src/modules/clinical/service";
+import { finishEncounter, getPatientChart, signNote, startEncounter } from "../../src/modules/clinical/service";
 import { remindDueFollowUps, remindFollowUp } from "../../src/jobs/follow-ups";
 import { sendWaitlistOffer } from "../../src/jobs/waitlist";
 import type { Actor } from "../../src/modules/identity/validators";
@@ -22,6 +23,7 @@ const clinicDay = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
 const patient = (index: number): Actor => ({ id: seedId(200 + index), clinicId: seedIds.clinic, role: "patient", patientId: seedId(100 + index), mfaVerified: false, authenticatedAt: Date.now(), mfaVerifiedAt: null });
 const staffAccount = (id: string, role: Actor["role"]): Actor => ({ id, clinicId: seedIds.clinic, role, patientId: null, mfaVerified: true, authenticatedAt: Date.now(), mfaVerifiedAt: Date.now() });
 const clinician = () => staffAccount(seedIds.clinician, "clinician");
+const otherClinician = () => staffAccount(seedIds.secondClinician, "clinician");
 const staff = () => staffAccount(seedIds.staff, "staff");
 const admin = () => staffAccount(seedIds.admin, "admin");
 const openSlots = (providerId = seedIds.clinician) => listProviderAvailability(patient(0), { providerId, days: 21 });
@@ -77,6 +79,39 @@ afterAll(async () => {
 afterEach(async () => {
   vi.unstubAllEnvs(); vi.unstubAllGlobals();
   await owner.query("UPDATE waitlist_entries SET status = 'left' WHERE status = 'waiting'");
+});
+
+describe("who viewed my record", () => {
+  it("shows what a clinician did in plain words, and not what the patient did themselves", async () => {
+    const [slot] = await openSlots();
+    await bookAppointment(patient(2), { providerId: seedIds.clinician, slotId: slot.id, reason: "Headaches" });
+    await getPatientChart(clinician(), seedId(102));
+    const { entries } = await getMyRecordAccess(patient(2), {});
+    expect(entries[0]).toMatchObject({ person: "Dr. Selin Arslan", role: "Clinician", kind: "routine", note: null });
+    expect(entries[0].activities).toContain("Opened your chart");
+    expect(entries.flatMap((entry) => entry.activities)).not.toContain("Looked at your appointments");
+    expect(entries.some((entry) => entry.person === "Sofia Moretti")).toBe(false);
+  });
+  it("sets emergency access apart, with the reason the clinician gave", async () => {
+    const reason = "Unconscious on arrival, allergies needed before treating.";
+    await requestBreakGlass(otherClinician(), { patientId: seedId(104), reason });
+    const { entries } = await getMyRecordAccess(patient(4), {});
+    expect(entries[0]).toMatchObject({ person: "Dr. Levent Erdem", kind: "emergency", note: reason });
+  });
+  it("shows a refused attempt, because the attempt happened", async () => {
+    await expect(getPatientChart(otherClinician(), seedId(106))).rejects.toBeInstanceOf(AccessDeniedError);
+    const { entries } = await getMyRecordAccess(patient(6), {});
+    expect(entries[0]).toMatchObject({ person: "Dr. Levent Erdem", kind: "refused" });
+    expect(entries[0].activities).toEqual(["Tried to open your record and was refused"]);
+  });
+  it("is one patient's own, and reading it is recorded", async () => {
+    await getPatientChart(clinician(), seedId(108));
+    expect((await getMyRecordAccess(patient(10), {})).entries.flatMap((entry) => entry.activities)).not.toContain("Opened your chart");
+    await expect(getMyRecordAccess(staff(), {})).rejects.toBeInstanceOf(AccessDeniedError);
+    await expect(getMyRecordAccess(admin(), {})).rejects.toBeInstanceOf(AccessDeniedError);
+    const audit = await owner.query("SELECT count(*)::int AS count FROM audit_log WHERE action = 'identity.record_access_viewed' AND patient_id = $1", [seedId(110)]);
+    expect(audit.rows[0].count).toBe(1);
+  });
 });
 
 describe("follow-up plans", () => {
