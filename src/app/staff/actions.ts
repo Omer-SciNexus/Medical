@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { assertSameOrigin, invitePatientPortal, resendPatientPortalInvitation, listPortalLinks, type Actor } from "@/modules/identity";
 import { advanceAppointment, correctPatient, getPatientDetails, PossibleDuplicateError, listPatients, registerPatient, searchPatients } from "@/modules/scheduling";
-import { sendFollowUpReminderNow, declineAppointmentRequest, findRequestMatches, linkAppointmentRequestToPatient, registerAndInviteFromRequest } from "@/modules/scheduling";
+import { closeFollowUp, sendFollowUpReminderNow, declineAppointmentRequest, findRequestMatches, linkAppointmentRequestToPatient, registerAndInviteFromRequest } from "@/modules/scheduling";
 import { patientAge } from "@/modules/clinical";
 import { publishChange } from "@/platform/realtime";
 import { requireActor } from "@/app/session";
@@ -179,4 +179,13 @@ export async function remindFollowUpAction(_previous: ActionState, form: FormDat
   } catch (error) { return toActionState(error); }
   revalidatePath(FOLLOW_UPS);
   return { ok: true, notice: "Reminder queued. It goes out as soon as the worker picks it up." };
+}
+export async function closeFollowUpAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    await closeFollowUp(actor, { followUpId: field(form, "followUpId"), reason: field(form, "reason") });
+  } catch (error) { return toActionState(error); }
+  revalidatePath(FOLLOW_UPS);
+  return { ok: true };
 }
