@@ -100,3 +100,18 @@ export const followUps = pgTable("follow_ups", {
   index("follow_up_appointment").on(t.appointmentId),
   check("follow_up_booking", sql`(${t.status} = 'booked') = (${t.appointmentId} IS NOT NULL)`),
   check("follow_up_closed_reason", sql`(${t.status} = 'closed') = (${t.closedReason} IS NOT NULL)`)]);
+
+export const waitlistStatus = pgEnum("waitlist_status", ["waiting", "booked", "left"]);
+
+// With an appointment, the patient wants that visit moved earlier. Without one, they want a first
+// time with this clinician. A patient waits once per clinician.
+export const waitlistEntries = pgTable("waitlist_entries", {
+  ...recordColumns(),
+  patientId: uuid("patient_id").notNull(),
+  providerId: uuid("provider_id").notNull(),
+  appointmentId: uuid("appointment_id"),
+  reason: text("reason").notNull(),
+  status: waitlistStatus("status").default("waiting").notNull(),
+}, (t) => [uniqueIndex("waitlist_entries_clinic_id_unique").on(t.clinicId, t.id),
+  uniqueIndex("waitlist_one_active").on(t.clinicId, t.patientId, t.providerId).where(sql`${t.status} = 'waiting' AND ${t.deletedAt} IS NULL`),
+  index("waitlist_queue").on(t.clinicId, t.providerId, t.status, t.createdAt), index("waitlist_appointment").on(t.appointmentId)]);
