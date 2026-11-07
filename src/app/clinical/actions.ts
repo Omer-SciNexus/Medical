@@ -228,14 +228,14 @@ export async function removeChargeLineAction(_previous: ActionState, form: FormD
 }
 export async function completeVisitAction(_previous: ActionState, form: FormData): Promise<ActionState> {
   const encounterId = String(form.get("encounterId") ?? "");
-  const summary = String(form.get("summary") ?? "");
+  const values = { summary: String(form.get("summary") ?? ""), followUpDays: String(form.get("followUpDays") ?? ""), followUpNote: String(form.get("followUpNote") ?? "") };
   try {
     await assertSameOrigin();
     const actor = await requireActor(["clinician"]);
-    await finishEncounter(actor, { encounterId, summary });
-  } catch (error) { return toActionState(error, { summary }); }
+    await finishEncounter(actor, { encounterId, ...values });
+  } catch (error) { return toActionState(error, values); }
   revalidatePath(`/clinical/encounters/${encounterId}`);
-  return { ok: true };
+  return { ok: true, notice: values.followUpDays ? "Follow-up planned. It now shows on the patient's portal and the front desk's Follow-ups list." : undefined };
 }
 
 export type UploadTicket = { ok: true; documentId: string; uploadUrl: string; contentType: string } | { ok: false; error: string };
