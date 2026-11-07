@@ -13,7 +13,7 @@ import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchem
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
 import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
 import { closeFollowUpSchema, followUpIdSchema, FollowUpError, joinWaitlistSchema, WaitlistError, waitlistEntryIdSchema, waitlistOfferIdSchema } from "./validators";
-import { acceptOffer, closeFollowUpRow, findFollowUp, insertFollowUp, insertWaitlistEntry, leaveWaitlistEntry, listFollowUpWorklist, listPatientFollowUps, listPatientWaitlist, requestFollowUpReminder } from "./repository";
+import { acceptOffer, closeFollowUpRow, findFollowUp, insertFollowUp, insertWaitlistEntry, leaveWaitlistEntry, listFollowUpWorklist, listPatientFollowUps, listPatientWaitlist, requestFollowUpReminder, summariseWaitlist } from "./repository";
 import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
@@ -106,13 +106,16 @@ export async function getClinicReport(actor: Actor, input: unknown) {
   const start = from ?? addClinicDays(todayInZone(timeZone), -days);
   const end = addClinicDays(start, days);
   const window = { from: zonedStartOfDay(start, timeZone), to: zonedStartOfDay(end, timeZone) };
-  const [totals, providers, waits] = await Promise.all([
+  const [totals, providers, waits, waitlist] = await Promise.all([
     summariseClinicDays(actor.clinicId, window.from, window.to),
     summariseProviderUtilisation(actor.clinicId, window.from, window.to),
     waitDistribution(actor.clinicId, window.from, window.to),
+    // The other figures are finished days. This one runs through the last day shown, so a visit
+    // saved this morning counts this morning rather than tomorrow.
+    summariseWaitlist(actor.clinicId, window.from, zonedStartOfDay(addClinicDays(end, 1), timeZone)),
   ]);
   await recordScopedEvent(actor, { action: "scheduling.report_read", purpose: "administration", reason: `${start}:${days}` });
-  return { from: start, to: end, days, timeZone, totals, providers, waits };
+  return { from: start, to: end, days, timeZone, totals, providers, waits, waitlist };
 }
 function requireFrontDesk(actor: Actor) {
   if ((actor.role !== "staff" && actor.role !== "admin") || !actor.mfaVerified) throw new AccessScopeError();

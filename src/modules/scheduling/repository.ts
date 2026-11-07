@@ -190,6 +190,15 @@ export async function findOfferForNotification(clinicId: string, offerId: string
       isNull(availabilitySlots.deletedAt), gt(availabilitySlots.startsAt, new Date()), slotIsFree(availabilitySlots.id))).limit(1);
   return offer;
 }
+/** Counts only, for the clinic report. */
+export async function summariseWaitlist(clinicId: string, from: Date, to: Date) {
+  const [[waiting], [offers]] = await Promise.all([
+    getDb().select({ count: sql<number>`count(*)::int` }).from(waitlistEntries).where(and(eq(waitlistEntries.clinicId, clinicId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt))),
+    getDb().select({ offered: sql<number>`count(*)::int`, filled: sql<number>`count(${waitlistOffers.acceptedAt})::int` }).from(waitlistOffers)
+      .where(and(eq(waitlistOffers.clinicId, clinicId), gte(waitlistOffers.createdAt, from), lt(waitlistOffers.createdAt, to))),
+  ]);
+  return { waiting: waiting?.count ?? 0, offered: offers?.offered ?? 0, filled: offers?.filled ?? 0 };
+}
 
 /** Called inside the completion transaction, whose audit covers the chart write. */
 export async function insertFollowUp(tx: Transaction, actor: Actor, input: { patientId: string; encounterId: string; dueOn: string; note?: string }) {
