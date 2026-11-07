@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, CalendarDays, CalendarPlus, CalendarRange, CheckCheck, ChevronRight, ClipboardList, Clock3, FileText, Inbox, Receipt, ShieldCheck, Stethoscope, Users } from "lucide-react";
+import { ArrowRight, ArrowUpRight, CalendarClock, CalendarDays, CalendarPlus, CalendarRange, CheckCheck, ChevronRight, ClipboardList, Clock3, FileText, Inbox, Receipt, ShieldCheck, Stethoscope, Users } from "lucide-react";
 import type { Actor } from "@/modules/identity";
 import { greetingName } from "@/lib/format";
 
@@ -35,6 +35,7 @@ const workspaces = {
     shortcuts: [
       { href: "/staff/board", title: "Waiting room", text: "Follow arrivals and visit progress", icon: ClipboardList },
       { href: "/staff/patients", title: "Find a patient", text: "Registrations and portal access", icon: Users },
+      { href: "/staff/follow-ups", title: "Follow-ups", text: "Patients who still need to book", icon: CalendarClock },
       { href: "/admin/services", title: "Invoices & payments", text: "Review charges and record payments", icon: Receipt },
     ],
   },
