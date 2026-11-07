@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gt, gte, isNull, lt, ne, notExists, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, isNull, lt, lte, ne, notExists, sql } from "drizzle-orm";
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, grantWorkflowAccess, type Actor } from "@/modules/identity";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
@@ -116,6 +116,12 @@ export async function requestFollowUpReminder(actor: Actor, followUpId: string, 
 }
 export async function markFollowUpReminded(clinicId: string, followUpId: string) {
   await getDb().update(followUps).set({ remindedAt: new Date() }).where(and(eq(followUps.id, followUpId), eq(followUps.clinicId, clinicId)));
+}
+/** System-level read for the worker: follow-ups coming due that nobody has been told about yet. */
+export async function listFollowUpsToRemind(onOrBefore: string) {
+  return getDb().select({ id: followUps.id, clinicId: followUps.clinicId }).from(followUps)
+    .where(and(eq(followUps.status, "pending"), isNull(followUps.remindedAt), isNull(followUps.deletedAt), lte(followUps.dueOn, onOrBefore)))
+    .orderBy(asc(followUps.dueOn)).limit(500);
 }
 export async function listPatientAppointments(actor: Actor, patientId: string, page?: { view: "upcoming" | "past"; number: number; at: Date }) {
   const upcoming = sql`${availabilitySlots.startsAt} > ${page?.at.toISOString() ?? new Date().toISOString()}::timestamptz AND ${appointments.status} NOT IN ('cancelled', 'done', 'no_show')`;

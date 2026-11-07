@@ -1,8 +1,9 @@
 import "server-only";
 import { describeNotificationClinic, findPortalContact, recordSystemEvent } from "@/modules/identity";
-import { findFollowUp, markFollowUpReminded } from "@/modules/scheduling";
+import { findFollowUp, listFollowUpsToRemind, markFollowUpReminded } from "@/modules/scheduling";
 import { addClinicDays, todayInZone } from "@/lib/clinic-day";
 import { sendJobMail } from "@/platform/mailer";
+import { logOperational } from "@/platform/log";
 
 /** How long before a follow-up falls due the patient hears about it. */
 export const FOLLOW_UP_NOTICE_DAYS = 7;
@@ -26,4 +27,19 @@ export async function remindFollowUp(clinicId: string, followUpId: string, optio
   await markFollowUpReminded(clinicId, followUpId);
   await recordSystemEvent({ clinicId, patientId: followUp.patientId, action: "scheduling.follow_up_reminded", purpose: "scheduling", resourceId: followUpId });
   return { sent: true, delivered: delivery.delivered };
+}
+/** The hourly pass. One undeliverable address must not stop the rest, so each failure is its own. */
+export async function remindDueFollowUps() {
+  // The day is a day ahead of UTC at most in any clinic; remindFollowUp decides in clinic time.
+  const horizon = new Date(Date.now() + (FOLLOW_UP_NOTICE_DAYS + 1) * 86_400_000).toISOString().slice(0, 10);
+  const due = await listFollowUpsToRemind(horizon);
+  let sent = 0;
+  for (const followUp of due) {
+    try {
+      if ((await remindFollowUp(followUp.clinicId, followUp.id)).sent) sent += 1;
+    } catch {
+      logOperational("job.failed", { code: "FOLLOW_UP_REMINDER_FAILED" });
+    }
+  }
+  return { due: due.length, sent };
 }
