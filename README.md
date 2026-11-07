@@ -10,6 +10,12 @@ The application has patient booking and appointment history, a clinical queue, c
 
 The reliability pass adds serialized autosave, atomic signing and visit transitions, transactionally audited billing, mail retry handling, appointment pagination and clinic-specific timezones. Prescribing still requires a validated production safety provider; the synthetic fixture cannot authorize issuance.
 
+Three features carry care beyond the visit itself:
+
+- **Follow-up plans.** On completing a visit the clinician can ask to see the patient again. The patient is asked to book in their portal and reminded a week before the date, and the front desk has a list of who has not booked. Booking with that clinician clears it; cancelling or missing that visit brings it back.
+- **Waiting list.** A patient can wait for a first time with a clinician, or for an earlier time for a visit they hold. A cancelled or vacated time is offered at once to the three people waiting longest, and the first to accept gets it. The report counts the visits saved.
+- **Who viewed my record.** A patient reads their own access history from the tamper-evident audit log, in plain words, including refused attempts and emergency access with the reason given.
+
 ## Run it
 
 Needs Node.js 22 or newer and Docker with Linux-container support.
