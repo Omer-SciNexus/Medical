@@ -29,7 +29,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     <p>Nothing was changed. Confirm the database is running, then reload this page.</p>
   </div></div>);
 
-  const { totals, providers: utilisation, waits } = report;
+  const { totals, providers: utilisation, waits, waitlist } = report;
   const nameOf = (providerId: string) => providers.find((provider) => provider.id === providerId)?.displayName ?? "A former colleague";
   const arrivals = waits.reduce((sum, band) => sum + band.arrivals, 0);
   return shell(<>
@@ -84,5 +84,15 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <div className="queue-footer"><span>Taken up is booked appointments against times offered, counting a cancellation as a time that went unused.</span></div>
       </section>
     </div>
+
+    <section className="specimen" style={{ marginTop: 20 }}>
+      <div className="specimen-topline"><strong>Waiting list</strong><span>cancelled times given a second life</span></div>
+      <div className="board-summary" style={{ border: 0, background: "transparent" }}>
+        <div><span className="board-count">{waitlist.filled}</span><span>visits saved</span></div>
+        <div><span className="board-count">{waitlist.offered}</span><span>offers sent</span></div>
+        <div><span className="board-count">{waitlist.waiting}</span><span>waiting now</span></div>
+      </div>
+      <div className="queue-footer"><span>A visit is saved when a patient on the waiting list takes a time someone else gave up.</span></div>
+    </section>
   </>);
 }
