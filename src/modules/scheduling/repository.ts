@@ -130,6 +130,15 @@ export async function leaveWaitlistEntry(actor: Actor, patientId: string, entryI
     return entry;
   }));
 }
+/** System-level read for the offer mail: nothing clinical, and nothing if the offer has lapsed. */
+export async function findOfferForNotification(clinicId: string, offerId: string) {
+  const [offer] = await getDb().select({ patientId: waitlistEntries.patientId, entryId: waitlistEntries.id, startsAt: availabilitySlots.startsAt })
+    .from(waitlistOffers).innerJoin(waitlistEntries, eq(waitlistEntries.id, waitlistOffers.entryId))
+    .innerJoin(availabilitySlots, and(eq(availabilitySlots.id, waitlistOffers.slotId), eq(availabilitySlots.clinicId, waitlistOffers.clinicId)))
+    .where(and(eq(waitlistOffers.id, offerId), eq(waitlistOffers.clinicId, clinicId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt),
+      isNull(availabilitySlots.deletedAt), gt(availabilitySlots.startsAt, new Date()), slotIsFree(availabilitySlots.id))).limit(1);
+  return offer;
+}
 
 /** Called inside the completion transaction, whose audit covers the chart write. */
 export async function insertFollowUp(tx: Transaction, actor: Actor, input: { patientId: string; encounterId: string; dueOn: string; note?: string }) {

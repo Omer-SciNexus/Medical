@@ -5,6 +5,7 @@ import { findChargeForNotification } from "@/modules/billing";
 import { sendJobMail } from "@/platform/mailer";
 import { scheduleAppointmentReminders, sendAppointmentReminder } from "./reminders";
 import { remindDueFollowUps, remindFollowUp } from "./follow-ups";
+import { sendWaitlistOffer } from "./waitlist";
 
 export type JobPayload = Record<string, string>;
 /**
@@ -20,6 +21,7 @@ const handlers: Record<string, (payload: JobPayload) => Promise<unknown>> = {
   "follow_up.planned": async (payload) => remindFollowUp(payload.clinicId, payload.resourceId),
   "follow_up.remind": async (payload) => remindFollowUp(payload.clinicId, payload.resourceId, { requested: true }),
   "follow_up.sweep": async () => remindDueFollowUps(),
+  "waitlist.offered": async (payload) => sendWaitlistOffer(payload.clinicId, payload.resourceId),
   // The scheduled full pass: the only check that can see an alteration made before a checkpoint.
   "audit.verify_chain": async () => verifyChainFully(),
   "visit_summary.published": async (payload) => {
