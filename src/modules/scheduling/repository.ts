@@ -1,10 +1,11 @@
 import "server-only";
-import { and, asc, desc, eq, gt, gte, isNull, lt, lte, ne, notExists, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, isNull, lt, lte, ne, notExists, or, sql } from "drizzle-orm";
+import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, grantWorkflowAccess, type Actor } from "@/modules/identity";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { enqueueOutbox } from "@/platform/outbox";
-import { appointmentRequests, appointments, availabilitySlots, availabilityTemplates, followUps, patients, scheduleBlackouts, waitlistEntries } from "./schema";
+import { appointmentRequests, appointments, availabilitySlots, availabilityTemplates, followUps, patients, scheduleBlackouts, waitlistEntries, waitlistOffers } from "./schema";
 import { SlotUnavailableError, StaleAppointmentError, WaitlistError, type AppointmentRequestInput, type AppointmentStatus } from "./validators";
 
 // Authorization metadata only. Never return clinical or demographic fields here.
@@ -78,6 +79,37 @@ export async function moveAppointmentToSlot(actor: Actor, input: { appointmentId
   }
 }
 
+/** How many people hear about one freed time. More than one, because nobody is held to answering. */
+const OFFER_BATCH = 3;
+/** Nobody can usefully take a time that starts sooner than this. */
+const OFFER_MIN_LEAD_MS = 60 * 60_000;
+// A slot is free when no live appointment claims it; an offer on it stays live until then.
+const slotIsFree = (slotId: AnyPgColumn) => sql`NOT EXISTS (SELECT 1 FROM ${appointments} WHERE ${appointments.slotId} = ${slotId} AND ${appointments.deletedAt} IS NULL AND ${appointments.status} <> 'cancelled')`;
+/**
+ * Offers a just-freed time to the people waiting longest, in the transaction that freed it, so an
+ * offer exists exactly when the time is free and needs no worker running. Whoever already holds a
+ * live offer is passed over, so one person ignoring their mail does not shut everyone else out, and
+ * someone moving a visit is only offered a time earlier than the one they have.
+ */
+async function offerFreedSlot(tx: Transaction, clinicId: string, slotId: string) {
+  const [slot] = await tx.select({ providerId: availabilitySlots.providerId, startsAt: availabilitySlots.startsAt }).from(availabilitySlots)
+    .where(and(eq(availabilitySlots.id, slotId), eq(availabilitySlots.clinicId, clinicId), isNull(availabilitySlots.deletedAt))).limit(1);
+  if (!slot || slot.startsAt.getTime() <= Date.now() + OFFER_MIN_LEAD_MS) return;
+  const currentSlot = alias(availabilitySlots, "current_slot");
+  const offeredSlot = alias(availabilitySlots, "offered_slot");
+  const candidates = await tx.select({ id: waitlistEntries.id }).from(waitlistEntries)
+    .leftJoin(appointments, and(eq(appointments.id, waitlistEntries.appointmentId), eq(appointments.clinicId, waitlistEntries.clinicId)))
+    .leftJoin(currentSlot, and(eq(currentSlot.id, appointments.slotId), eq(currentSlot.clinicId, appointments.clinicId)))
+    .where(and(eq(waitlistEntries.clinicId, clinicId), eq(waitlistEntries.providerId, slot.providerId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt),
+      or(isNull(waitlistEntries.appointmentId), gt(currentSlot.startsAt, slot.startsAt)),
+      notExists(tx.select({ one: sql`1` }).from(waitlistOffers).innerJoin(offeredSlot, eq(offeredSlot.id, waitlistOffers.slotId))
+        .where(and(eq(waitlistOffers.entryId, waitlistEntries.id), isNull(offeredSlot.deletedAt), gt(offeredSlot.startsAt, new Date()), slotIsFree(offeredSlot.id))))))
+    .orderBy(asc(waitlistEntries.createdAt)).limit(OFFER_BATCH);
+  if (!candidates.length) return;
+  const offers = await tx.insert(waitlistOffers).values(candidates.map((entry) => ({ clinicId, entryId: entry.id, slotId })))
+    .onConflictDoNothing({ target: [waitlistOffers.entryId, waitlistOffers.slotId] }).returning({ id: waitlistOffers.id });
+  for (const offer of offers) await enqueueOutbox(tx, { clinicId, topic: "waitlist.offered", resourceId: offer.id });
+}
 export async function insertWaitlistEntry(actor: Actor, patientId: string, input: { providerId: string; reason: string; appointmentId?: string }) {
   try {
     return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.waitlist_joined", async () => {
@@ -272,7 +304,7 @@ export async function transitionAppointment(actor: Actor, input: { appointmentId
       .set({ status: input.status, revision: input.revision + 1, updatedBy: actor.id, ...(input.status === "checked_in" ? { checkedInAt: new Date() } : {}) })
       .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId),
         eq(appointments.revision, input.revision), isNull(appointments.deletedAt)))
-      .returning({ id: appointments.id, revision: appointments.revision });
+      .returning({ id: appointments.id, revision: appointments.revision, slotId: appointments.slotId });
     if (!updated) throw new StaleAppointmentError();
     if (input.status === "cancelled" || input.status === "no_show") {
       await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.cancelled", resourceId: input.appointmentId });
@@ -280,6 +312,8 @@ export async function transitionAppointment(actor: Actor, input: { appointmentId
       await tx.update(followUps).set({ status: "pending", appointmentId: null, updatedBy: actor.id })
         .where(and(eq(followUps.clinicId, actor.clinicId), eq(followUps.appointmentId, input.appointmentId), eq(followUps.status, "booked")));
     }
+    // A no-show's time has passed and stays claimed; only a cancellation frees one.
+    if (input.status === "cancelled") await offerFreedSlot(tx, actor.clinicId, updated.slotId);
     // Arrival is when the chart opens. Authority to read, document and prescribe begins with
     // the patient physically here, commits with the check-in itself, and stays revocable.
     if (input.status === "checked_in") {
