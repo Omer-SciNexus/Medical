@@ -12,7 +12,7 @@ import { appointmentRequestIdSchema, appointmentRequestSchema, declineAppointmen
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
 import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
-import { insertFollowUp, listPatientFollowUps } from "./repository";
+import { insertFollowUp, listFollowUpWorklist, listPatientFollowUps } from "./repository";
 import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
@@ -358,6 +358,14 @@ export async function planFollowUpInTransaction(tx: Transaction, actor: Actor, i
 }
 export async function listMyFollowUps(actor: Actor) {
   return listPatientFollowUps(actor, ownPatientId(actor));
+}
+/** Who the front desk needs to chase. Names across the clinic, so reading it is recorded. */
+export async function getFollowUpWorklist(actor: Actor) {
+  requireFrontDesk(actor);
+  const timeZone = (await getClinicSettings(actor))?.timezone ?? clinicTimezone();
+  const rows = await listFollowUpWorklist(actor.clinicId);
+  await recordScopedEvent(actor, { action: "scheduling.follow_ups_read", purpose: "scheduling", reason: `${rows.length}` });
+  return { today: todayInZone(timeZone), timeZone, followUps: rows };
 }
 
 const REQUEST_CONFIRM_SECONDS = 24 * 60 * 60;

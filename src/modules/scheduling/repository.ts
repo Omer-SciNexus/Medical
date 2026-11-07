@@ -88,6 +88,14 @@ export async function listPatientFollowUps(actor: Actor, patientId: string) {
       .where(and(eq(followUps.clinicId, actor.clinicId), eq(followUps.patientId, patientId), eq(followUps.status, "pending"), isNull(followUps.deletedAt)))
       .orderBy(asc(followUps.dueOn)).limit(20)));
 }
+/** The front desk's list: who and when, without the clinician's note. */
+export async function listFollowUpWorklist(clinicId: string) {
+  return getDb().select({ id: followUps.id, patientId: followUps.patientId, providerId: followUps.providerId, dueOn: followUps.dueOn, remindedAt: followUps.remindedAt,
+    givenName: patients.givenName, surname: patients.surname, mrn: patients.mrn })
+    .from(followUps).innerJoin(patients, and(eq(patients.id, followUps.patientId), eq(patients.clinicId, followUps.clinicId)))
+    .where(and(eq(followUps.clinicId, clinicId), eq(followUps.status, "pending"), isNull(followUps.deletedAt), isNull(patients.deletedAt)))
+    .orderBy(asc(followUps.dueOn), asc(followUps.id)).limit(100);
+}
 export async function listPatientAppointments(actor: Actor, patientId: string, page?: { view: "upcoming" | "past"; number: number; at: Date }) {
   const upcoming = sql`${availabilitySlots.startsAt} > ${page?.at.toISOString() ?? new Date().toISOString()}::timestamptz AND ${appointments.status} NOT IN ('cancelled', 'done', 'no_show')`;
   return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.appointments_read", () =>

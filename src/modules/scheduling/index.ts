@@ -4,7 +4,7 @@ export { registerPatient, searchPatients, listPatients, getPatientDetails, corre
 export { reschedulePatientAppointment, listMyAppointmentOptions } from "./service";
 export { getWaitingRoomBoard, getClinicReport } from "./service";
 export { findRequestClinic, submitAppointmentRequest, confirmAppointmentRequest, listAppointmentRequests, findRequestMatches, linkAppointmentRequestToPatient, registerAndInviteFromRequest, declineAppointmentRequest } from "./service";
-export { planFollowUpInTransaction, listMyFollowUps } from "./service";
+export { planFollowUpInTransaction, listMyFollowUps, getFollowUpWorklist } from "./service";
 export { findReminderTarget, listReminderWindow } from "./repository";
 export { SlotUnavailableError, StaleAppointmentError, ScheduleAuthoringError, PatientRegistrationError, PossibleDuplicateError, AppointmentRequestError, FollowUpError, appointmentRequestSchema, formatRequestCode, appointmentStatusSchema, bookingSchema, transitionSchema, followUpPlanSchema, FOLLOW_UP_INTERVALS, FOLLOW_UP_CLOSE_REASONS } from "./validators";
 export { waitingMinutes, canTransition, roleMayTransition } from "./policy";
