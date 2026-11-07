@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ArrowRight, CalendarCheck, ChevronRight, Home, TriangleAlert } from "lucide-react";
 import { AppShell } from "@/components/app/shell";
 import { getClinicSettings, listCareProviders } from "@/modules/identity";
-import { listMyAppointmentOptions, listMyAppointmentPage, listMyFollowUps } from "@/modules/scheduling";
+import { listMyAppointmentOptions, listMyAppointmentPage, listMyFollowUps, listMyWaitlist } from "@/modules/scheduling";
 import { clinicTimezone, todayInZone } from "@/lib/clinic-day";
 import { requireActor } from "@/app/session";
 import { Appointments } from "./appointments";
@@ -22,7 +22,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     <AppShell actor={actor} clinicName={clinicName} current="/patient/appointments" breadcrumb={breadcrumb} register="patient">{children}</AppShell>;
 
   try {
-    const [clinic, providers, result, followUps] = await Promise.all([getClinicSettings(actor), listCareProviders(actor), listMyAppointmentPage(actor, { view, number: page }), listMyFollowUps(actor)]);
+    const [clinic, providers, result, followUps, waitlist] = await Promise.all([getClinicSettings(actor), listCareProviders(actor), listMyAppointmentPage(actor, { view, number: page }), listMyFollowUps(actor), listMyWaitlist(actor)]);
     const nameOf = (providerId: string) => providers.find((provider) => provider.id === providerId)?.displayName ?? "Your clinician";
     const today = todayInZone(timeZone);
     const dueDay = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" });
@@ -45,6 +45,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
       />
       <Appointments
         page={page} view={view}
+        waitlistedProviders={waitlist.entries.map((entry) => entry.providerId)}
         timeZone={timeZone}
         moving={moving ? { id: moving.id, revision: moving.revision, providerId: moving.providerId } : null}
         options={options.map((slot) => ({ id: slot.id, startsAt: slot.startsAt.toISOString(), endsAt: slot.endsAt.toISOString() }))}
