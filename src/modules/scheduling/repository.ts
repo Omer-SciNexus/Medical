@@ -48,6 +48,19 @@ export async function claimSlot(actor: Actor, patientId: string, input: { slotId
     throw error;
   }
 }
+async function applyMove(tx: Transaction, actor: Actor, input: { appointmentId: string; patientId: string; revision: number; slotId: string; providerId: string }) {
+  const [slot] = await tx.select({ id: availabilitySlots.id, startsAt: availabilitySlots.startsAt }).from(availabilitySlots)
+    .where(and(eq(availabilitySlots.id, input.slotId), eq(availabilitySlots.clinicId, actor.clinicId), eq(availabilitySlots.providerId, input.providerId), isNull(availabilitySlots.deletedAt)))
+    .for("update").limit(1);
+  if (!slot || slot.startsAt.getTime() <= Date.now()) throw new SlotUnavailableError();
+  const [moved] = await tx.update(appointments).set({ slotId: input.slotId, revision: input.revision + 1, updatedBy: actor.id })
+    .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId),
+      eq(appointments.revision, input.revision), eq(appointments.status, "booked"), isNull(appointments.deletedAt)))
+    .returning({ id: appointments.id, revision: appointments.revision, slotId: appointments.slotId });
+  if (!moved) throw new StaleAppointmentError();
+  await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.rescheduled", resourceId: input.appointmentId, uniqueBy: `appointment.rescheduled:${input.appointmentId}:${moved.revision}` });
+  return moved;
+}
 /**
  * Moves an appointment onto another slot in one statement: the row stops referencing the old
  * slot, which releases it, and active_slot_booking is what guarantees the new one was free.
@@ -55,19 +68,7 @@ export async function claimSlot(actor: Actor, patientId: string, input: { slotId
  */
 export async function moveAppointmentToSlot(actor: Actor, input: { appointmentId: string; patientId: string; revision: number; slotId: string; providerId: string }) {
   try {
-    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "scheduling", "scheduling.appointment_rescheduled", async () => {
-      const [slot] = await tx.select({ id: availabilitySlots.id, startsAt: availabilitySlots.startsAt }).from(availabilitySlots)
-        .where(and(eq(availabilitySlots.id, input.slotId), eq(availabilitySlots.clinicId, actor.clinicId), eq(availabilitySlots.providerId, input.providerId), isNull(availabilitySlots.deletedAt)))
-        .for("update").limit(1);
-      if (!slot || slot.startsAt.getTime() <= Date.now()) throw new SlotUnavailableError();
-      const [moved] = await tx.update(appointments).set({ slotId: input.slotId, revision: input.revision + 1, updatedBy: actor.id })
-        .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId),
-          eq(appointments.revision, input.revision), eq(appointments.status, "booked"), isNull(appointments.deletedAt)))
-        .returning({ id: appointments.id, revision: appointments.revision, slotId: appointments.slotId });
-      if (!moved) throw new StaleAppointmentError();
-      await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.rescheduled", resourceId: input.appointmentId, uniqueBy: `appointment.rescheduled:${input.appointmentId}:${moved.revision}` });
-      return moved;
-    }));
+    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "scheduling", "scheduling.appointment_rescheduled", () => applyMove(tx, actor, input)));
   } catch (error) {
     if (isUniqueViolation(error)) throw new SlotUnavailableError();
     throw error;
