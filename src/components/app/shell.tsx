@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { WorkspaceNavigation } from "./workspace-navigation";
-import { LayoutDashboard, CalendarCheck, CalendarClock, CalendarPlus, CalendarRange, ChartNoAxesColumn, ClipboardList, Inbox, KeyRound, LogOut, MonitorCheck, Radio, Receipt, ScrollText, ShieldCheck, UserRoundPlus, Users } from "lucide-react";
+import { LayoutDashboard, CalendarCheck, CalendarClock, CalendarPlus, CalendarRange, ChartNoAxesColumn, ClipboardList, Eye, Inbox, KeyRound, LogOut, MonitorCheck, Radio, Receipt, ScrollText, ShieldCheck, UserRoundPlus, Users } from "lucide-react";
 import { MeridianMark } from "@/components/design/graphics";
 import { signOutAction } from "@/app/(auth)/actions";
 import type { Actor } from "@/modules/identity";
@@ -10,7 +10,7 @@ const overview = { href: "/dashboard", label: "Overview", icon: LayoutDashboard 
 const navigation = {
   clinician: [overview, { href: "/clinical/today", label: "Today's clinic", icon: ClipboardList }],
   staff: [overview, { href: "/admin/services", label: "Invoices", icon: Receipt }, { href: "/staff/board", label: "Waiting room", icon: MonitorCheck }, { href: "/staff/patients", label: "Patients", icon: UserRoundPlus }, { href: "/staff/requests", label: "Requests", icon: Inbox }, { href: "/staff/follow-ups", label: "Follow-ups", icon: CalendarClock }],
-  patient: [overview, { href: "/patient/appointments", label: "Appointments", icon: CalendarCheck }, { href: "/patient/book", label: "Book a visit", icon: CalendarPlus }],
+  patient: [overview, { href: "/patient/appointments", label: "Appointments", icon: CalendarCheck }, { href: "/patient/book", label: "Book a visit", icon: CalendarPlus }, { href: "/patient/access", label: "Record access", icon: Eye }],
   admin: [overview, { href: "/admin/people", label: "People", icon: Users }, { href: "/admin/schedule", label: "Schedule", icon: CalendarRange },
     { href: "/staff/board", label: "Waiting room", icon: MonitorCheck }, { href: "/staff/patients", label: "Patients", icon: UserRoundPlus }, { href: "/staff/requests", label: "Requests", icon: Inbox }, { href: "/staff/follow-ups", label: "Follow-ups", icon: CalendarClock },
     { href: "/admin/access", label: "Access", icon: KeyRound }, { href: "/admin/services", label: "Price list", icon: Receipt }, { href: "/admin/reports", label: "Report", icon: ChartNoAxesColumn }, { href: "/admin/outbox", label: "Event delivery", icon: Radio },
