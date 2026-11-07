@@ -323,6 +323,9 @@ export async function transitionAppointment(actor: Actor, input: { appointmentId
       // The visit a follow-up was waiting on is not going to happen, so it needs booking again.
       await tx.update(followUps).set({ status: "pending", appointmentId: null, updatedBy: actor.id })
         .where(and(eq(followUps.clinicId, actor.clinicId), eq(followUps.appointmentId, input.appointmentId), eq(followUps.status, "booked")));
+      // There is no longer a visit to move earlier.
+      await tx.update(waitlistEntries).set({ status: "left", updatedBy: actor.id })
+        .where(and(eq(waitlistEntries.clinicId, actor.clinicId), eq(waitlistEntries.appointmentId, input.appointmentId), eq(waitlistEntries.status, "waiting")));
     }
     // A no-show's time has passed and stays claimed; only a cancellation frees one.
     if (input.status === "cancelled") await offerFreedSlot(tx, actor.clinicId, updated.slotId);
