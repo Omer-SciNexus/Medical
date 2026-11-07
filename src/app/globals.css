@@ -761,6 +761,11 @@ kbd { display: inline-flex; min-width: 18px; height: 19px; justify-content: cent
 .appointment-list-past > li { opacity: 0.82; }
 .follow-up-plan { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 14px; margin-top: 14px; }
 @media (max-width: 640px) { .follow-up-plan { grid-template-columns: minmax(0, 1fr); } }
+.waitlist-join { margin-top: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 14px 18px; }
+.waitlist-join summary { display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 14px; font-weight: 500; }
+.waitlist-join summary svg { width: 14px; height: 14px; }
+.waitlist-join form { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 12px; }
+.waitlist-join .field { width: 100%; }
 .follow-up-reason { width: 150px; height: 30px; min-height: 0; padding: 2px 8px; font-size: 12px; }
 .chart-identity { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; }
 .chart-columns { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 18px; align-items: start; }
