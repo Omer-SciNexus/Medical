@@ -4,7 +4,7 @@ import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, grantWorkflowAccess, type Actor } from "@/modules/identity";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { enqueueOutbox } from "@/platform/outbox";
-import { appointmentRequests, appointments, availabilitySlots, availabilityTemplates, patients, scheduleBlackouts } from "./schema";
+import { appointmentRequests, appointments, availabilitySlots, availabilityTemplates, followUps, patients, scheduleBlackouts } from "./schema";
 import { SlotUnavailableError, StaleAppointmentError, type AppointmentRequestInput, type AppointmentStatus } from "./validators";
 
 // Authorization metadata only. Never return clinical or demographic fields here.
@@ -73,6 +73,14 @@ export async function moveAppointmentToSlot(actor: Actor, input: { appointmentId
     if (isUniqueViolation(error)) throw new SlotUnavailableError();
     throw error;
   }
+}
+
+/** Called inside the completion transaction, whose audit covers the chart write. */
+export async function insertFollowUp(tx: Transaction, actor: Actor, input: { patientId: string; encounterId: string; dueOn: string; note?: string }) {
+  const [followUp] = await tx.insert(followUps).values({ clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id, patientId: input.patientId, providerId: actor.id, encounterId: input.encounterId, dueOn: input.dueOn, note: input.note ?? null })
+    .returning({ id: followUps.id });
+  await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "follow_up.planned", resourceId: followUp.id });
+  return followUp;
 }
 export async function listPatientAppointments(actor: Actor, patientId: string, page?: { view: "upcoming" | "past"; number: number; at: Date }) {
   const upcoming = sql`${availabilitySlots.startsAt} > ${page?.at.toISOString() ?? new Date().toISOString()}::timestamptz AND ${appointments.status} NOT IN ('cancelled', 'done', 'no_show')`;

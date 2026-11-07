@@ -12,6 +12,7 @@ import { appointmentRequestIdSchema, appointmentRequestSchema, declineAppointmen
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
 import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
+import { insertFollowUp } from "./repository";
 import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
@@ -343,6 +344,17 @@ export async function listMyAppointmentPage(actor: Actor, input: unknown) {
   const page = z.object({ view: z.enum(["upcoming", "past"]).default("upcoming"), number: z.coerce.number().int().min(1).max(10000).default(1) }).parse(input);
   const rows = await listPatientAppointments(actor, ownPatientId(actor), { ...page, at: new Date() });
   return { entries: rows.slice(0, 25), hasMore: rows.length > 25, ...page };
+}
+
+/**
+ * Consumed by the clinical completion transaction. Asking to see someone again is the clinician's
+ * decision about their own patient, so the visit's clinical authority is what covers it.
+ */
+export async function planFollowUpInTransaction(tx: Transaction, actor: Actor, input: { patientId: string; encounterId: string; dueOn: string; note?: string }) {
+  if (actor.role !== "clinician" || !actor.mfaVerified) throw new AccessScopeError();
+  const followUp = await insertFollowUp(tx, actor, input);
+  await recordScopedEvent(actor, { action: "scheduling.follow_up_planned", purpose: "clinical.write", patientId: input.patientId, resourceId: followUp.id }, tx);
+  return followUp;
 }
 
 const REQUEST_CONFIRM_SECONDS = 24 * 60 * 60;
