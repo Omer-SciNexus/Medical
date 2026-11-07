@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { assertSameOrigin } from "@/modules/identity";
-import { advanceAppointment, bookAppointment, joinWaitlist, leaveWaitlist, reschedulePatientAppointment } from "@/modules/scheduling";
+import { acceptWaitlistOffer, advanceAppointment, bookAppointment, joinWaitlist, leaveWaitlist, reschedulePatientAppointment } from "@/modules/scheduling";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
 import type { ActionState } from "@/lib/action-state";
@@ -33,6 +33,19 @@ export async function cancelAppointmentAction(_previous: ActionState, form: Form
   } catch (error) { return toActionState(error); }
   revalidatePath(APPOINTMENTS);
   return { ok: true };
+}
+/** A lost race still refreshes the page, so the offer that has gone disappears beside the message. */
+export async function acceptOfferAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["patient"]);
+    await acceptWaitlistOffer(actor, { offerId: String(form.get("offerId") ?? "") });
+  } catch (error) {
+    revalidatePath(APPOINTMENTS);
+    return toActionState(error);
+  }
+  revalidatePath(APPOINTMENTS);
+  return { ok: true, notice: "That time is yours. You can see it in your upcoming visits below." };
 }
 export async function joinWaitlistAction(_previous: ActionState, form: FormData): Promise<ActionState> {
   const values = { reason: String(form.get("reason") ?? "") };
