@@ -12,8 +12,8 @@ import { appointmentRequestIdSchema, appointmentRequestSchema, declineAppointmen
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
 import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
-import { closeFollowUpSchema, followUpIdSchema, FollowUpError, joinWaitlistSchema, WaitlistError, waitlistEntryIdSchema } from "./validators";
-import { closeFollowUpRow, findFollowUp, insertFollowUp, insertWaitlistEntry, leaveWaitlistEntry, listFollowUpWorklist, listPatientFollowUps, listPatientWaitlist, requestFollowUpReminder } from "./repository";
+import { closeFollowUpSchema, followUpIdSchema, FollowUpError, joinWaitlistSchema, WaitlistError, waitlistEntryIdSchema, waitlistOfferIdSchema } from "./validators";
+import { acceptOffer, closeFollowUpRow, findFollowUp, insertFollowUp, insertWaitlistEntry, leaveWaitlistEntry, listFollowUpWorklist, listPatientFollowUps, listPatientWaitlist, requestFollowUpReminder } from "./repository";
 import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
@@ -410,6 +410,10 @@ export async function leaveWaitlist(actor: Actor, input: unknown) {
 }
 export async function listMyWaitlist(actor: Actor) {
   return listPatientWaitlist(actor, ownPatientId(actor));
+}
+export async function acceptWaitlistOffer(actor: Actor, input: unknown) {
+  const { offerId } = waitlistOfferIdSchema.parse(input);
+  return acceptOffer(actor, ownPatientId(actor), offerId);
 }
 
 const REQUEST_CONFIRM_SECONDS = 24 * 60 * 60;

@@ -149,6 +149,38 @@ export async function listPatientWaitlist(actor: Actor, patientId: string) {
     return { entries, offers };
   }));
 }
+/**
+ * Takes an offered time for the patient it was offered to. The entry is locked so a double click
+ * acts once; the time itself is decided by active_slot_booking, so of several people accepting
+ * together exactly one succeeds and the rest learn it has gone. Moving a visit frees its old time,
+ * which is offered on to the next person in turn.
+ */
+export async function acceptOffer(actor: Actor, patientId: string, offerId: string) {
+  try {
+    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.waitlist_offer_accepted", async () => {
+      const [offer] = await tx.select({ id: waitlistOffers.id, entryId: waitlistEntries.id, slotId: waitlistOffers.slotId, providerId: waitlistEntries.providerId, appointmentId: waitlistEntries.appointmentId, reason: waitlistEntries.reason })
+        .from(waitlistOffers).innerJoin(waitlistEntries, eq(waitlistEntries.id, waitlistOffers.entryId))
+        .where(and(eq(waitlistOffers.id, offerId), eq(waitlistOffers.clinicId, actor.clinicId), eq(waitlistEntries.patientId, patientId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt)))
+        .for("update", { of: waitlistEntries }).limit(1);
+      if (!offer) throw new WaitlistError("This offer is no longer open.");
+      let appointmentId: string;
+      if (offer.appointmentId) {
+        const [appointment] = await tx.select({ revision: appointments.revision }).from(appointments)
+          .where(and(eq(appointments.id, offer.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.status, "booked"), isNull(appointments.deletedAt))).limit(1);
+        if (!appointment) throw new StaleAppointmentError();
+        appointmentId = (await applyMove(tx, actor, { appointmentId: offer.appointmentId, patientId, revision: appointment.revision, slotId: offer.slotId, providerId: offer.providerId })).id;
+      } else {
+        appointmentId = (await insertBooking(tx, actor, patientId, { slotId: offer.slotId, providerId: offer.providerId, reason: offer.reason })).id;
+      }
+      await tx.update(waitlistEntries).set({ status: "booked", updatedBy: actor.id }).where(eq(waitlistEntries.id, offer.entryId));
+      await tx.update(waitlistOffers).set({ acceptedAt: new Date() }).where(eq(waitlistOffers.id, offer.id));
+      return { appointmentId };
+    }));
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new SlotUnavailableError();
+    throw error;
+  }
+}
 /** System-level read for the offer mail: nothing clinical, and nothing if the offer has lapsed. */
 export async function findOfferForNotification(clinicId: string, offerId: string) {
   const [offer] = await getDb().select({ patientId: waitlistEntries.patientId, entryId: waitlistEntries.id, startsAt: availabilitySlots.startsAt })
