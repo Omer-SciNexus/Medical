@@ -53,6 +53,13 @@ $env:NODE_OPTIONS = '--dns-result-order=ipv4first --no-network-family-autoselect
 4. Back as the patient, read the published summary.
 5. As `admin@example.test`, open `/admin/audit` to see every read, write and denial.
 
+To see what happens around the visit:
+
+1. As `clinician@example.test`, choose **See this patient again?** when completing a visit. Choosing one week sends the reminder straight away.
+2. As that patient, open `/patient/appointments` and choose a time. As `staff@example.test`, `/staff/follow-ups` lists the patient until they book.
+3. As `portal.2482@example.test`, open **Book a visit**, choose a clinician and join the waiting list. As `patient@example.test`, book a time with the same clinician and cancel it. The first patient now sees the offer on `/patient/appointments`, and taking it shows up under **Waiting list** on `/admin/reports`.
+4. As any patient, open `/patient/access` to see who has been in their record.
+
 To watch authorization refuse something, sign in as `clinician2@example.test` and open the other clinician's encounter. It is denied, and the denial is recorded.
 
 ## Verify
