@@ -6,6 +6,7 @@ import { AppShell } from "@/components/app/shell";
 import { Badge } from "@/components/ui/primitives";
 import { getClinicSettings } from "@/modules/identity";
 import { assistConfigured, VITALS, getEncounterWorkspace } from "@/modules/clinical";
+import { FOLLOW_UP_INTERVALS } from "@/modules/scheduling";
 import { clinicalDate, clinicalName } from "@/lib/format";
 import { clinicTimezone } from "@/lib/clinic-day";
 import { requireActor } from "@/app/session";
@@ -52,6 +53,7 @@ export default async function EncounterPage({ params }: { params: Promise<{ uuid
           charge={charge ? { amountMinor: charge.amountMinor, currency: charge.currency } : null}
           fee={{ amountMinor: invoice?.amountMinor ?? 0, currency: invoice?.currency ?? clinic?.currency ?? "TRY" }}
           aiEnabled={assistConfigured()}
+          followUpIntervals={FOLLOW_UP_INTERVALS.map((interval) => ({ days: interval.days, label: interval.label }))}
         />
 
         {encounter.status === "in_progress" ? <p className="row-actions" style={{ marginTop: 18 }}>
