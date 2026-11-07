@@ -10,11 +10,11 @@ import { bookAppointmentAction } from "@/app/patient/actions";
 
 type Slot = { id: string; startsAt: string; endsAt: string };
 
-export function Booking({ providerId, providerName, slots, timeZone }: { providerId: string; providerName: string; slots: Slot[]; timeZone: string }) {
+export function Booking({ providerId, providerName, slots, timeZone, initialReason = "" }: { providerId: string; providerName: string; slots: Slot[]; timeZone: string; initialReason?: string }) {
   const router = useRouter();
   const [state, book, pending] = useActionState(bookAppointmentAction, idleAction);
   const [slotId, setSlotId] = React.useState<string | null>(null);
-  const [reason, setReason] = React.useState("");
+  const [reason, setReason] = React.useState(initialReason);
   const taken = state.code === "slot_taken";
 
   // On a conflict the chosen provider and reason are kept; only the time is released and the
