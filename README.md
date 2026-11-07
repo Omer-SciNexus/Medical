@@ -77,6 +77,8 @@ npm audit --omit=dev       # the gate CI blocks on
 
 Development output uses `.next-dev`; production uses `.next`. Browser tests build into `.next-test` and own port 4013, without reusing your development server. The default browser suite covers public/design pages and unauthenticated access; it does not prove the authenticated visit workflow.
 
+Apply migration `0017_follow_ups_and_waitlist` (`npm run db:migrate`) before running this version, or the patient and front-desk pages that read those tables report that they could not load. Offers appear without the worker running, but follow-up reminders and offer emails need `npm.cmd run worker`.
+
 Apply migration `0014_observation_provenance` before running the updated application. Existing observations keep unknown encounter provenance. New observations require a matching clinic, patient and encounter. The migration also records actual mutation time after database lock waits.
 
 For per-client authentication limits, configure `AUTH_TRUSTED_IP_HEADER` only behind a proxy that overwrites that header and prevents direct access to the origin. Without this setting the application retains a conservative shared bucket. Background mail jobs fail and retry when delivery is unconfigured or rejected; queue handoff is not proof of provider acceptance.
