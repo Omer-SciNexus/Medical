@@ -123,6 +123,11 @@ export async function listRecordAccessEvents(clinicId: string, patientId: string
       options.before ? lt(auditLog.seq, options.before) : undefined))
     .orderBy(desc(auditLog.seq)).limit(options.limit);
 }
+export async function listNamesOfUsers(clinicId: string, userIds: string[]) {
+  if (!userIds.length) return [];
+  return getDb().select({ id: users.id, displayName: users.displayName, role: users.role }).from(users)
+    .where(and(eq(users.clinicId, clinicId), inArray(users.id, userIds))).limit(userIds.length);
+}
 export async function verifyAuditChain() {
   const rows = await getAuditDb().execute<{ checked: string | number; broken_seq: string | number | null }>(sql`SELECT * FROM verify_audit_chain()`);
   const [result] = "rows" in rows ? rows.rows : (rows as unknown as { checked: string | number; broken_seq: string | number | null }[]);
