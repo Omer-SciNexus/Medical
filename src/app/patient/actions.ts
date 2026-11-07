@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { assertSameOrigin } from "@/modules/identity";
-import { advanceAppointment, bookAppointment, reschedulePatientAppointment } from "@/modules/scheduling";
+import { advanceAppointment, bookAppointment, joinWaitlist, reschedulePatientAppointment } from "@/modules/scheduling";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
 import type { ActionState } from "@/lib/action-state";
@@ -31,6 +31,18 @@ export async function cancelAppointmentAction(_previous: ActionState, form: Form
     // The ordinary transition path: a patient may only ever move an appointment to cancelled.
     await advanceAppointment(actor, { appointmentId: String(form.get("appointmentId") ?? ""), revision: Number(form.get("revision") ?? 0), status: "cancelled" });
   } catch (error) { return toActionState(error); }
+  revalidatePath(APPOINTMENTS);
+  return { ok: true };
+}
+export async function joinWaitlistAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const values = { reason: String(form.get("reason") ?? "") };
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["patient"]);
+    // A form joining from an appointment sends no reason: the visit already has one.
+    await joinWaitlist(actor, { providerId: String(form.get("providerId") ?? ""), reason: form.get("reason") === null ? undefined : values.reason,
+      appointmentId: form.get("appointmentId") === null ? undefined : String(form.get("appointmentId")) });
+  } catch (error) { return toActionState(error, values); }
   revalidatePath(APPOINTMENTS);
   return { ok: true };
 }
