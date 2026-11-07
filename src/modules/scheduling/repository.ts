@@ -57,12 +57,15 @@ async function applyMove(tx: Transaction, actor: Actor, input: { appointmentId: 
     .where(and(eq(availabilitySlots.id, input.slotId), eq(availabilitySlots.clinicId, actor.clinicId), eq(availabilitySlots.providerId, input.providerId), isNull(availabilitySlots.deletedAt)))
     .for("update").limit(1);
   if (!slot || slot.startsAt.getTime() <= Date.now()) throw new SlotUnavailableError();
+  const [before] = await tx.select({ slotId: appointments.slotId }).from(appointments)
+    .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId))).limit(1);
   const [moved] = await tx.update(appointments).set({ slotId: input.slotId, revision: input.revision + 1, updatedBy: actor.id })
     .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId),
       eq(appointments.revision, input.revision), eq(appointments.status, "booked"), isNull(appointments.deletedAt)))
     .returning({ id: appointments.id, revision: appointments.revision, slotId: appointments.slotId });
   if (!moved) throw new StaleAppointmentError();
   await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.rescheduled", resourceId: input.appointmentId, uniqueBy: `appointment.rescheduled:${input.appointmentId}:${moved.revision}` });
+  if (before && before.slotId !== moved.slotId) await offerFreedSlot(tx, actor.clinicId, before.slotId);
   return moved;
 }
 /**
