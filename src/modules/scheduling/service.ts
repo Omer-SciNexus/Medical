@@ -12,7 +12,7 @@ import { appointmentRequestIdSchema, appointmentRequestSchema, declineAppointmen
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
 import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
-import { insertFollowUp } from "./repository";
+import { insertFollowUp, listPatientFollowUps } from "./repository";
 import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
@@ -355,6 +355,9 @@ export async function planFollowUpInTransaction(tx: Transaction, actor: Actor, i
   const followUp = await insertFollowUp(tx, actor, input);
   await recordScopedEvent(actor, { action: "scheduling.follow_up_planned", purpose: "clinical.write", patientId: input.patientId, resourceId: followUp.id }, tx);
   return followUp;
+}
+export async function listMyFollowUps(actor: Actor) {
+  return listPatientFollowUps(actor, ownPatientId(actor));
 }
 
 const REQUEST_CONFIRM_SECONDS = 24 * 60 * 60;

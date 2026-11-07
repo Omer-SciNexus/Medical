@@ -82,6 +82,12 @@ export async function insertFollowUp(tx: Transaction, actor: Actor, input: { pat
   await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "follow_up.planned", resourceId: followUp.id });
   return followUp;
 }
+export async function listPatientFollowUps(actor: Actor, patientId: string) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.follow_ups_read", () =>
+    tx.select({ id: followUps.id, providerId: followUps.providerId, dueOn: followUps.dueOn, note: followUps.note }).from(followUps)
+      .where(and(eq(followUps.clinicId, actor.clinicId), eq(followUps.patientId, patientId), eq(followUps.status, "pending"), isNull(followUps.deletedAt)))
+      .orderBy(asc(followUps.dueOn)).limit(20)));
+}
 export async function listPatientAppointments(actor: Actor, patientId: string, page?: { view: "upcoming" | "past"; number: number; at: Date }) {
   const upcoming = sql`${availabilitySlots.startsAt} > ${page?.at.toISOString() ?? new Date().toISOString()}::timestamptz AND ${appointments.status} NOT IN ('cancelled', 'done', 'no_show')`;
   return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.appointments_read", () =>
