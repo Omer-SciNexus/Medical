@@ -8,10 +8,11 @@ import { readFile } from "node:fs/promises";
 import { migrateDatabase } from "../../scripts/migrate";
 import { seedDatabase, seedId, seedIds } from "../../scripts/seed";
 import { encryptSecret } from "../../src/modules/identity/crypto";
-import { AccessScopeError, advanceAppointment, bookAppointment, closeFollowUp, getFollowUpWorklist, listMyFollowUps, listProviderAvailability, sendFollowUpReminderNow } from "../../src/modules/scheduling/service";
-import { FollowUpError } from "../../src/modules/scheduling/validators";
+import { AccessScopeError, acceptWaitlistOffer, advanceAppointment, bookAppointment, closeFollowUp, getClinicReport, getFollowUpWorklist, joinWaitlist, leaveWaitlist, listMyFollowUps, listMyWaitlist, listProviderAvailability, reschedulePatientAppointment, sendFollowUpReminderNow } from "../../src/modules/scheduling/service";
+import { FollowUpError, SlotUnavailableError, WaitlistError } from "../../src/modules/scheduling/validators";
 import { finishEncounter, signNote, startEncounter } from "../../src/modules/clinical/service";
 import { remindDueFollowUps, remindFollowUp } from "../../src/jobs/follow-ups";
+import { sendWaitlistOffer } from "../../src/jobs/waitlist";
 import type { Actor } from "../../src/modules/identity/validators";
 
 let postgres: StartedPostgreSqlContainer | undefined;
@@ -22,9 +23,11 @@ const patient = (index: number): Actor => ({ id: seedId(200 + index), clinicId: 
 const staffAccount = (id: string, role: Actor["role"]): Actor => ({ id, clinicId: seedIds.clinic, role, patientId: null, mfaVerified: true, authenticatedAt: Date.now(), mfaVerifiedAt: Date.now() });
 const clinician = () => staffAccount(seedIds.clinician, "clinician");
 const staff = () => staffAccount(seedIds.staff, "staff");
+const admin = () => staffAccount(seedIds.admin, "admin");
 const openSlots = (providerId = seedIds.clinician) => listProviderAvailability(patient(0), { providerId, days: 21 });
-const statusOf = async (table: "follow_ups", id: string) => (await owner.query(`SELECT status FROM ${table} WHERE id = $1`, [id])).rows[0].status as string;
+const statusOf = async (table: "follow_ups" | "waitlist_entries", id: string) => (await owner.query(`SELECT status FROM ${table} WHERE id = $1`, [id])).rows[0].status as string;
 const revisionOf = async (appointmentId: string) => (await owner.query("SELECT revision FROM appointments WHERE id = $1", [appointmentId])).rows[0].revision as number;
+const startOf = async (appointmentId: string) => (await owner.query("SELECT s.starts_at FROM appointments a JOIN availability_slots s ON s.id = a.slot_id WHERE a.id = $1", [appointmentId])).rows[0].starts_at as Date;
 
 /** A whole visit, from booking to the signed and completed encounter. */
 async function completeVisit(index: number, plan: { followUpDays?: string; followUpNote?: string }) {
@@ -36,6 +39,13 @@ async function completeVisit(index: number, plan: { followUpDays?: string; follo
   await signNote(clinician(), { encounterId: encounter.id, versionId: note.id, revision: note.revision, content: "Subjective: well. Plan: recheck the pressure." });
   await finishEncounter(clinician(), { encounterId: encounter.id, summary: "Your blood pressure was reviewed today.", ...plan });
   return encounter.id;
+}
+/** Someone books a time and gives it back, which is the moment offers go out. */
+async function freeATime(holder: number, slotId?: string) {
+  const id = slotId ?? (await openSlots())[0].id;
+  const { id: appointmentId } = await bookAppointment(patient(holder), { providerId: seedIds.clinician, slotId: id, reason: "A visit that gets cancelled" });
+  await advanceAppointment(patient(holder), { appointmentId, revision: await revisionOf(appointmentId), status: "cancelled" });
+  return id;
 }
 
 beforeAll(async () => {
@@ -63,8 +73,10 @@ afterAll(async () => {
   await owner?.end(); await redis?.stop(); await postgres?.stop();
 });
 
-afterEach(() => {
+// Each test starts with nobody in line, so an earlier test's patient cannot absorb its offers.
+afterEach(async () => {
   vi.unstubAllEnvs(); vi.unstubAllGlobals();
+  await owner.query("UPDATE waitlist_entries SET status = 'left' WHERE status = 'waiting'");
 });
 
 describe("follow-up plans", () => {
@@ -161,5 +173,133 @@ describe("follow-up plans", () => {
     expect(outbox.rows[0].count).toBe(1);
     await owner.query("UPDATE follow_ups SET reminded_at = now() WHERE id = $1", [followUp.id]);
     await expect(sendFollowUpReminderNow(staff(), { followUpId: followUp.id })).rejects.toBeInstanceOf(FollowUpError);
+  });
+});
+
+describe("the waiting list", () => {
+  it("offers a cancelled time to the people waiting longest, and no more than three", async () => {
+    for (const index of [1, 3, 5, 7]) await joinWaitlist(patient(index), { providerId: seedIds.clinician, reason: "Any time soon" });
+    const slotId = await freeATime(9);
+    for (const index of [1, 3, 5]) expect((await listMyWaitlist(patient(index))).offers.map((offer) => offer.slotId)).toEqual([slotId]);
+    expect((await listMyWaitlist(patient(7))).offers).toEqual([]);
+    expect((await listMyWaitlist(patient(9))).entries).toEqual([]);
+  });
+  it("passes over someone already holding an open offer, so the next person gets a turn", async () => {
+    for (const index of [1, 3, 5, 7]) await joinWaitlist(patient(index), { providerId: seedIds.clinician, reason: "Any time soon" });
+    await freeATime(9);
+    const second = await freeATime(9);
+    expect((await listMyWaitlist(patient(7))).offers.map((offer) => offer.slotId)).toEqual([second]);
+    expect((await listMyWaitlist(patient(1))).offers).toHaveLength(1);
+  });
+  it("gives the time to exactly one of two people accepting at once", async () => {
+    await joinWaitlist(patient(11), { providerId: seedIds.clinician, reason: "Any time soon" });
+    await joinWaitlist(patient(13), { providerId: seedIds.clinician, reason: "Any time soon" });
+    const slotId = await freeATime(9);
+    const [first] = (await listMyWaitlist(patient(11))).offers;
+    const [second] = (await listMyWaitlist(patient(13))).offers;
+    const results = await Promise.allSettled([acceptWaitlistOffer(patient(11), { offerId: first.id }), acceptWaitlistOffer(patient(13), { offerId: second.id })]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const lost = results.find((result) => result.status === "rejected") as PromiseRejectedResult;
+    expect(lost.reason).toBeInstanceOf(SlotUnavailableError);
+    const claims = await owner.query("SELECT count(*)::int AS count FROM appointments WHERE slot_id = $1 AND status <> 'cancelled'", [slotId]);
+    expect(claims.rows[0].count).toBe(1);
+    // Whoever lost keeps their place, and the offer that has gone is no longer shown.
+    const loser = results[0].status === "rejected" ? 11 : 13;
+    expect(await listMyWaitlist(patient(loser))).toMatchObject({ offers: [], entries: [{ reason: "Any time soon" }] });
+  });
+  it("never lets one patient take an offer made to another", async () => {
+    await joinWaitlist(patient(15), { providerId: seedIds.clinician, reason: "Any time soon" });
+    await freeATime(9);
+    const [offer] = (await listMyWaitlist(patient(15))).offers;
+    await expect(acceptWaitlistOffer(patient(17), { offerId: offer.id })).rejects.toBeInstanceOf(WaitlistError);
+    expect((await listMyWaitlist(patient(15))).offers).toHaveLength(1);
+  });
+  it("moves a visit earlier, and only ever earlier, then offers the old time on", async () => {
+    const open = await openSlots();
+    const [earlySlot, lateSlot, laterSlot] = [open[0], open[open.length - 2], open[open.length - 1]];
+    const { id: visit } = await bookAppointment(patient(19), { providerId: seedIds.clinician, slotId: lateSlot.id, reason: "Knee pain" });
+    await joinWaitlist(patient(19), { providerId: seedIds.clinician, appointmentId: visit });
+    await joinWaitlist(patient(21), { providerId: seedIds.clinician, reason: "Any time soon" });
+    // A time after the visit they hold is no use to them, so it goes past them.
+    await freeATime(9, laterSlot.id);
+    expect((await listMyWaitlist(patient(19))).offers).toEqual([]);
+    expect((await listMyWaitlist(patient(21))).offers.map((offer) => offer.slotId)).toEqual([laterSlot.id]);
+    await freeATime(9, earlySlot.id);
+    const [offer] = (await listMyWaitlist(patient(19))).offers;
+    expect(offer.slotId).toBe(earlySlot.id);
+    await joinWaitlist(patient(17), { providerId: seedIds.clinician, reason: "Any time soon" });
+    await acceptWaitlistOffer(patient(19), { offerId: offer.id });
+    expect((await startOf(visit)).getTime()).toBe(earlySlot.startsAt.getTime());
+    const after = await owner.query("SELECT count(*)::int AS count FROM appointments WHERE patient_id = $1 AND status = 'booked'", [seedId(119)]);
+    expect(after.rows[0].count).toBe(1);
+    expect((await listMyWaitlist(patient(19))).entries).toEqual([]);
+    // The time they gave up is the next person's chance.
+    expect((await listMyWaitlist(patient(17))).offers.map((candidate) => candidate.slotId)).toEqual([lateSlot.id]);
+  });
+  it("offers a time given up by rescheduling", async () => {
+    const open = await openSlots();
+    const { id: visit } = await bookAppointment(patient(23), { providerId: seedIds.clinician, slotId: open[0].id, reason: "Rash" });
+    await joinWaitlist(patient(25), { providerId: seedIds.clinician, reason: "Any time soon" });
+    await reschedulePatientAppointment(patient(23), { appointmentId: visit, revision: await revisionOf(visit), slotId: open[1].id });
+    expect((await listMyWaitlist(patient(25))).offers.map((offer) => offer.slotId)).toEqual([open[0].id]);
+  });
+  it("stops offering a time once anyone has booked it", async () => {
+    await joinWaitlist(patient(27), { providerId: seedIds.clinician, reason: "Any time soon" });
+    const slotId = await freeATime(9);
+    const [offer] = (await listMyWaitlist(patient(27))).offers;
+    await bookAppointment(patient(29), { providerId: seedIds.clinician, slotId, reason: "Booked it directly" });
+    expect((await listMyWaitlist(patient(27))).offers).toEqual([]);
+    await expect(acceptWaitlistOffer(patient(27), { offerId: offer.id })).rejects.toBeInstanceOf(SlotUnavailableError);
+  });
+  it("takes someone off the list when they book that clinician anyway, or leave, or cancel the visit they wanted moved", async () => {
+    const booked = await joinWaitlist(patient(31), { providerId: seedIds.clinician, reason: "Any time soon" });
+    const open = await openSlots();
+    await bookAppointment(patient(31), { providerId: seedIds.clinician, slotId: open[0].id, reason: "Found a time" });
+    expect(await statusOf("waitlist_entries", booked.id)).toBe("booked");
+
+    const left = await joinWaitlist(patient(33), { providerId: seedIds.clinician, reason: "Any time soon" });
+    await expect(leaveWaitlist(patient(35), { entryId: left.id })).rejects.toBeInstanceOf(WaitlistError);
+    await leaveWaitlist(patient(33), { entryId: left.id });
+    expect(await statusOf("waitlist_entries", left.id)).toBe("left");
+
+    const { id: visit } = await bookAppointment(patient(37), { providerId: seedIds.clinician, slotId: open[1].id, reason: "Cough" });
+    const moving = await joinWaitlist(patient(37), { providerId: seedIds.clinician, appointmentId: visit });
+    await advanceAppointment(patient(37), { appointmentId: visit, revision: await revisionOf(visit), status: "cancelled" });
+    expect(await statusOf("waitlist_entries", moving.id)).toBe("left");
+  });
+  it("holds one place per clinician, refuses someone else's visit, and refuses an empty reason", async () => {
+    await joinWaitlist(patient(39), { providerId: seedIds.clinician, reason: "Any time soon" });
+    await expect(joinWaitlist(patient(39), { providerId: seedIds.clinician, reason: "Again please" })).rejects.toBeInstanceOf(WaitlistError);
+    const [slot] = await openSlots(seedIds.secondClinician);
+    const { id: theirs } = await bookAppointment(patient(38), { providerId: seedIds.secondClinician, slotId: slot.id, reason: "Theirs" });
+    await expect(joinWaitlist(patient(39), { providerId: seedIds.secondClinician, appointmentId: theirs })).rejects.toBeInstanceOf(AccessScopeError);
+    await expect(joinWaitlist(patient(39), { providerId: seedIds.secondClinician })).rejects.toThrow();
+    await expect(joinWaitlist(staff(), { providerId: seedIds.clinician, reason: "Not a patient" })).rejects.toBeInstanceOf(AccessScopeError);
+  });
+  it("tells them by mail without saying why they are waiting, and says nothing once the time has gone", async () => {
+    vi.stubEnv("MAIL_API_KEY", "synthetic-provider-key");
+    const fetcher = vi.fn().mockImplementation(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    await joinWaitlist(patient(1), { providerId: seedIds.clinician, reason: "Private matter" });
+    const slotId = await freeATime(9);
+    const [offer] = (await listMyWaitlist(patient(1))).offers;
+    const outbox = await owner.query("SELECT count(*)::int AS count FROM outbox WHERE topic = 'waitlist.offered' AND resource_id = $1", [offer.id]);
+    expect(outbox.rows[0].count).toBe(1);
+    expect(await sendWaitlistOffer(seedIds.clinic, offer.id)).toMatchObject({ sent: true });
+    expect(fetcher.mock.calls[0][1].body).not.toContain("Private matter");
+    await bookAppointment(patient(3), { providerId: seedIds.clinician, slotId, reason: "Booked it directly" });
+    expect(await sendWaitlistOffer(seedIds.clinic, offer.id)).toMatchObject({ sent: false });
+  });
+  it("counts the visits it saved in the clinic report, naming nobody", async () => {
+    const window = { from: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10), days: 3 };
+    const before = (await getClinicReport(admin(), window)).waitlist;
+    await joinWaitlist(patient(5), { providerId: seedIds.clinician, reason: "Any time soon" });
+    await joinWaitlist(patient(7), { providerId: seedIds.clinician, reason: "Any time soon" });
+    await freeATime(9);
+    const [offer] = (await listMyWaitlist(patient(5))).offers;
+    await acceptWaitlistOffer(patient(5), { offerId: offer.id });
+    const after = (await getClinicReport(admin(), window)).waitlist;
+    expect(before.waiting).toBe(0);
+    expect(after).toEqual({ waiting: 1, offered: before.offered + 2, filled: before.filled + 1 });
   });
 });
