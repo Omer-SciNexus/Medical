@@ -79,3 +79,24 @@ export const appointmentRequests = pgTable("appointment_requests", {
   linkedPatientId: uuid("linked_patient_id"),
 }, (t) => [index("appointment_request_queue").on(t.clinicId, t.status, t.createdAt),
   check("appointment_request_settled", sql`(${t.status} = 'pending') = (${t.resolvedAt} IS NULL AND ${t.resolvedBy} IS NULL)`)]);
+
+export const followUpStatus = pgEnum("follow_up_status", ["pending", "booked", "closed"]);
+
+// A clinician asking to see a patient again. Booking with that clinician satisfies it, and
+// cancelling or missing that booking reopens it, so nobody drops out of care unnoticed.
+export const followUps = pgTable("follow_ups", {
+  ...recordColumns(),
+  patientId: uuid("patient_id").notNull(),
+  providerId: uuid("provider_id").notNull(),
+  encounterId: uuid("encounter_id").notNull(),
+  dueOn: date("due_on").notNull(),
+  /** Written for the patient. It may be clinical, so it stays out of mail and the front-desk list. */
+  note: text("note"),
+  status: followUpStatus("status").default("pending").notNull(),
+  appointmentId: uuid("appointment_id"),
+  remindedAt: timestamp("reminded_at", { withTimezone: true }),
+  closedReason: text("closed_reason"),
+}, (t) => [uniqueIndex("follow_up_encounter").on(t.encounterId), index("follow_up_worklist").on(t.clinicId, t.status, t.dueOn), index("follow_up_patient").on(t.clinicId, t.patientId, t.status),
+  index("follow_up_appointment").on(t.appointmentId),
+  check("follow_up_booking", sql`(${t.status} = 'booked') = (${t.appointmentId} IS NOT NULL)`),
+  check("follow_up_closed_reason", sql`(${t.status} = 'closed') = (${t.closedReason} IS NOT NULL)`)]);
