@@ -42,6 +42,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
       </nav>
       <NextSteps
         followUps={followUps.map((followUp) => ({ id: followUp.id, providerId: followUp.providerId, providerName: nameOf(followUp.providerId), due: dueDay.format(new Date(`${followUp.dueOn}T12:00:00Z`)), overdue: followUp.dueOn < today, note: followUp.note }))}
+        waiting={waitlist.entries.map((entry) => ({ id: entry.id, providerName: nameOf(entry.providerId), reason: entry.reason, movesVisit: entry.appointmentId !== null }))}
       />
       <Appointments
         page={page} view={view}
