@@ -12,8 +12,8 @@ import { appointmentRequestIdSchema, appointmentRequestSchema, declineAppointmen
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
 import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
-import { closeFollowUpSchema, followUpIdSchema, FollowUpError, joinWaitlistSchema, WaitlistError } from "./validators";
-import { closeFollowUpRow, findFollowUp, insertFollowUp, insertWaitlistEntry, listFollowUpWorklist, listPatientFollowUps, requestFollowUpReminder } from "./repository";
+import { closeFollowUpSchema, followUpIdSchema, FollowUpError, joinWaitlistSchema, WaitlistError, waitlistEntryIdSchema } from "./validators";
+import { closeFollowUpRow, findFollowUp, insertFollowUp, insertWaitlistEntry, leaveWaitlistEntry, listFollowUpWorklist, listPatientFollowUps, requestFollowUpReminder } from "./repository";
 import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
@@ -403,6 +403,10 @@ export async function joinWaitlist(actor: Actor, input: unknown) {
   }
   if (!(await listCareProviders(actor)).some((provider) => provider.id === request.providerId)) throw new WaitlistError("That clinician is not taking bookings.");
   return insertWaitlistEntry(actor, patientId, { providerId: request.providerId, reason: request.reason! });
+}
+export async function leaveWaitlist(actor: Actor, input: unknown) {
+  const { entryId } = waitlistEntryIdSchema.parse(input);
+  if (!await leaveWaitlistEntry(actor, ownPatientId(actor), entryId)) throw new WaitlistError("You are no longer on that waiting list.");
 }
 
 const REQUEST_CONFIRM_SECONDS = 24 * 60 * 60;

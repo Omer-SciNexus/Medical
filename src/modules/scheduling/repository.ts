@@ -90,6 +90,14 @@ export async function insertWaitlistEntry(actor: Actor, patientId: string, input
     throw error;
   }
 }
+export async function leaveWaitlistEntry(actor: Actor, patientId: string, entryId: string) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.waitlist_left", async () => {
+    const [entry] = await tx.update(waitlistEntries).set({ status: "left", updatedBy: actor.id })
+      .where(and(eq(waitlistEntries.id, entryId), eq(waitlistEntries.clinicId, actor.clinicId), eq(waitlistEntries.patientId, patientId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt)))
+      .returning({ id: waitlistEntries.id });
+    return entry;
+  }));
+}
 
 /** Called inside the completion transaction, whose audit covers the chart write. */
 export async function insertFollowUp(tx: Transaction, actor: Actor, input: { patientId: string; encounterId: string; dueOn: string; note?: string }) {
