@@ -19,6 +19,7 @@ export const registrationSchema = z.object({
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, { path: ["confirmPassword"], message: "Your passwords don’t match." });
 export const challengeSchema = z.object({ challenge: z.string().regex(/^[a-f0-9]{64}$/), code: z.string().regex(/^(\d{6}|[A-F0-9]{8}-[A-F0-9]{8})$/) });
+export const recordAccessQuerySchema = z.object({ before: z.coerce.number().int().positive().optional() });
 export const emergencySchema = z.object({ patientId: z.uuid(), reason: z.string().trim().min(20).max(1000) });
 export const inviteSchema = z.object({
   email: emailSchema, displayName: z.string().trim().min(2, "Enter their full name.").max(100),

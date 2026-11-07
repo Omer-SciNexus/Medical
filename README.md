@@ -10,6 +10,12 @@ The application has patient booking and appointment history, a clinical queue, c
 
 The reliability pass adds serialized autosave, atomic signing and visit transitions, transactionally audited billing, mail retry handling, appointment pagination and clinic-specific timezones. Prescribing still requires a validated production safety provider; the synthetic fixture cannot authorize issuance.
 
+Three features carry care beyond the visit itself:
+
+- **Follow-up plans.** On completing a visit the clinician can ask to see the patient again. The patient is asked to book in their portal and reminded a week before the date, and the front desk has a list of who has not booked. Booking with that clinician clears it; cancelling or missing that visit brings it back.
+- **Waiting list.** A patient can wait for a first time with a clinician, or for an earlier time for a visit they hold. A cancelled or vacated time is offered at once to the three people waiting longest, and the first to accept gets it. The report counts the visits saved.
+- **Who viewed my record.** A patient reads their own access history from the tamper-evident audit log, in plain words, including refused attempts and emergency access with the reason given.
+
 ## Run it
 
 Needs Node.js 22 or newer and Docker with Linux-container support.
@@ -47,6 +53,13 @@ $env:NODE_OPTIONS = '--dns-result-order=ipv4first --no-network-family-autoselect
 4. Back as the patient, read the published summary.
 5. As `admin@example.test`, open `/admin/audit` to see every read, write and denial.
 
+To see what happens around the visit:
+
+1. As `clinician@example.test`, choose **See this patient again?** when completing a visit. Choosing one week sends the reminder straight away.
+2. As that patient, open `/patient/appointments` and choose a time. As `staff@example.test`, `/staff/follow-ups` lists the patient until they book.
+3. As `portal.2482@example.test`, open **Book a visit**, choose a clinician and join the waiting list. As `patient@example.test`, book a time with the same clinician and cancel it. The first patient now sees the offer on `/patient/appointments`, and taking it shows up under **Waiting list** on `/admin/reports`.
+4. As any patient, open `/patient/access` to see who has been in their record.
+
 To watch authorization refuse something, sign in as `clinician2@example.test` and open the other clinician's encounter. It is denied, and the denial is recorded.
 
 ## Verify
@@ -63,6 +76,8 @@ npm audit --omit=dev       # the gate CI blocks on
 ```
 
 Development output uses `.next-dev`; production uses `.next`. Browser tests build into `.next-test` and own port 4013, without reusing your development server. The default browser suite covers public/design pages and unauthenticated access; it does not prove the authenticated visit workflow.
+
+Apply migration `0017_follow_ups_and_waitlist` (`npm run db:migrate`) before running this version, or the patient and front-desk pages that read those tables report that they could not load. Offers appear without the worker running, but follow-up reminders and offer emails need `npm.cmd run worker`.
 
 Apply migration `0014_observation_provenance` before running the updated application. Existing observations keep unknown encounter provenance. New observations require a matching clinic, patient and encounter. The migration also records actual mutation time after database lock waits.
 

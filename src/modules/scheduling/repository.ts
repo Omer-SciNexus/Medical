@@ -1,11 +1,12 @@
 import "server-only";
-import { and, asc, desc, eq, gt, gte, isNull, lt, ne, notExists, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, notExists, or, sql } from "drizzle-orm";
+import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, grantWorkflowAccess, type Actor } from "@/modules/identity";
 import { isExclusionViolation, isUniqueViolation } from "@/platform/errors";
 import { enqueueOutbox } from "@/platform/outbox";
-import { appointmentRequests, appointments, availabilitySlots, availabilityTemplates, patients, scheduleBlackouts } from "./schema";
-import { SlotUnavailableError, StaleAppointmentError, type AppointmentRequestInput, type AppointmentStatus } from "./validators";
+import { appointmentRequests, appointments, availabilitySlots, availabilityTemplates, followUps, patients, scheduleBlackouts, waitlistEntries, waitlistOffers } from "./schema";
+import { SlotUnavailableError, StaleAppointmentError, WaitlistError, type AppointmentRequestInput, type AppointmentStatus } from "./validators";
 
 // Authorization metadata only. Never return clinical or demographic fields here.
 export async function patientIsInClinic(clinicId: string, patientId: string, tx?: Transaction) {
@@ -25,27 +26,49 @@ export async function findSlot(clinicId: string, slotId: string, providerId: str
     .where(and(eq(availabilitySlots.id, slotId), eq(availabilitySlots.clinicId, clinicId), eq(availabilitySlots.providerId, providerId), isNull(availabilitySlots.deletedAt))).limit(1);
   return slot;
 }
+async function insertBooking(tx: Transaction, actor: Actor, patientId: string, input: { slotId: string; providerId: string; reason: string }) {
+  // Lock the slot row first so concurrent bookings queue here rather than racing the insert.
+  const [slot] = await tx.select({ id: availabilitySlots.id, startsAt: availabilitySlots.startsAt }).from(availabilitySlots)
+    .where(and(eq(availabilitySlots.id, input.slotId), eq(availabilitySlots.clinicId, actor.clinicId), eq(availabilitySlots.providerId, input.providerId), isNull(availabilitySlots.deletedAt))).for("update").limit(1);
+  if (!slot || slot.startsAt.getTime() <= Date.now()) throw new SlotUnavailableError();
+  const [appointment] = await tx.insert(appointments).values({ clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id, patientId, slotId: input.slotId, reason: input.reason,
+    preparation: "Bring your current medication list and any recent test results." }).returning({ id: appointments.id });
+  // Booking is what gives the provider scheduling authority over this patient. Without it
+  // the patient would appear in a queue whose owner is then denied every read.
+  await grantWorkflowAccess(tx, { clinicId: actor.clinicId, actorId: input.providerId, patientId, purposes: ["scheduling"], grantedBy: actor.id, reason: "Appointment booked with this provider" });
+  // Reminders are scheduled by a worker reading this row, not inside the booking request.
+  await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.booked", resourceId: appointment.id });
+  // Seeing this clinician is what a follow-up asked for, and what a first-time wait was for.
+  await tx.update(followUps).set({ status: "booked", appointmentId: appointment.id, updatedBy: actor.id })
+    .where(and(eq(followUps.clinicId, actor.clinicId), eq(followUps.patientId, patientId), eq(followUps.providerId, input.providerId), eq(followUps.status, "pending"), isNull(followUps.deletedAt)));
+  await tx.update(waitlistEntries).set({ status: "booked", updatedBy: actor.id })
+    .where(and(eq(waitlistEntries.clinicId, actor.clinicId), eq(waitlistEntries.patientId, patientId), eq(waitlistEntries.providerId, input.providerId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.appointmentId), isNull(waitlistEntries.deletedAt)));
+  return appointment;
+}
 export async function claimSlot(actor: Actor, patientId: string, input: { slotId: string; providerId: string; reason: string }) {
   try {
-    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.appointment_booked", async () => {
-      // Lock the slot row first so concurrent bookings queue here rather than racing the insert.
-      const [slot] = await tx.select({ id: availabilitySlots.id, startsAt: availabilitySlots.startsAt }).from(availabilitySlots)
-        .where(and(eq(availabilitySlots.id, input.slotId), eq(availabilitySlots.clinicId, actor.clinicId), eq(availabilitySlots.providerId, input.providerId), isNull(availabilitySlots.deletedAt))).for("update").limit(1);
-      if (!slot || slot.startsAt.getTime() <= Date.now()) throw new SlotUnavailableError();
-      const [appointment] = await tx.insert(appointments).values({ clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id, patientId, slotId: input.slotId, reason: input.reason,
-        preparation: "Bring your current medication list and any recent test results." }).returning({ id: appointments.id });
-      // Booking is what gives the provider scheduling authority over this patient. Without it
-      // the patient would appear in a queue whose owner is then denied every read.
-      await grantWorkflowAccess(tx, { clinicId: actor.clinicId, actorId: input.providerId, patientId, purposes: ["scheduling"], grantedBy: actor.id, reason: "Appointment booked with this provider" });
-      // Reminders are scheduled by a worker reading this row, not inside the booking request.
-      await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.booked", resourceId: appointment.id });
-      return appointment;
-    }));
+    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.appointment_booked", () => insertBooking(tx, actor, patientId, input)));
   } catch (error) {
     // The partial unique index is the real guarantee; the row lock only reduces contention.
     if (isUniqueViolation(error)) throw new SlotUnavailableError();
     throw error;
   }
+}
+async function applyMove(tx: Transaction, actor: Actor, input: { appointmentId: string; patientId: string; revision: number; slotId: string; providerId: string }) {
+  const [slot] = await tx.select({ id: availabilitySlots.id, startsAt: availabilitySlots.startsAt }).from(availabilitySlots)
+    .where(and(eq(availabilitySlots.id, input.slotId), eq(availabilitySlots.clinicId, actor.clinicId), eq(availabilitySlots.providerId, input.providerId), isNull(availabilitySlots.deletedAt)))
+    .for("update").limit(1);
+  if (!slot || slot.startsAt.getTime() <= Date.now()) throw new SlotUnavailableError();
+  const [before] = await tx.select({ slotId: appointments.slotId }).from(appointments)
+    .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId))).limit(1);
+  const [moved] = await tx.update(appointments).set({ slotId: input.slotId, revision: input.revision + 1, updatedBy: actor.id })
+    .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId),
+      eq(appointments.revision, input.revision), eq(appointments.status, "booked"), isNull(appointments.deletedAt)))
+    .returning({ id: appointments.id, revision: appointments.revision, slotId: appointments.slotId });
+  if (!moved) throw new StaleAppointmentError();
+  await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.rescheduled", resourceId: input.appointmentId, uniqueBy: `appointment.rescheduled:${input.appointmentId}:${moved.revision}` });
+  if (before && before.slotId !== moved.slotId) await offerFreedSlot(tx, actor.clinicId, before.slotId);
+  return moved;
 }
 /**
  * Moves an appointment onto another slot in one statement: the row stops referencing the old
@@ -54,23 +77,173 @@ export async function claimSlot(actor: Actor, patientId: string, input: { slotId
  */
 export async function moveAppointmentToSlot(actor: Actor, input: { appointmentId: string; patientId: string; revision: number; slotId: string; providerId: string }) {
   try {
-    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "scheduling", "scheduling.appointment_rescheduled", async () => {
-      const [slot] = await tx.select({ id: availabilitySlots.id, startsAt: availabilitySlots.startsAt }).from(availabilitySlots)
-        .where(and(eq(availabilitySlots.id, input.slotId), eq(availabilitySlots.clinicId, actor.clinicId), eq(availabilitySlots.providerId, input.providerId), isNull(availabilitySlots.deletedAt)))
-        .for("update").limit(1);
-      if (!slot || slot.startsAt.getTime() <= Date.now()) throw new SlotUnavailableError();
-      const [moved] = await tx.update(appointments).set({ slotId: input.slotId, revision: input.revision + 1, updatedBy: actor.id })
-        .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId),
-          eq(appointments.revision, input.revision), eq(appointments.status, "booked"), isNull(appointments.deletedAt)))
-        .returning({ id: appointments.id, revision: appointments.revision, slotId: appointments.slotId });
-      if (!moved) throw new StaleAppointmentError();
-      await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.rescheduled", resourceId: input.appointmentId, uniqueBy: `appointment.rescheduled:${input.appointmentId}:${moved.revision}` });
-      return moved;
+    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "scheduling", "scheduling.appointment_rescheduled", () => applyMove(tx, actor, input)));
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new SlotUnavailableError();
+    throw error;
+  }
+}
+
+/** How many people hear about one freed time. More than one, because nobody is held to answering. */
+const OFFER_BATCH = 3;
+/** Nobody can usefully take a time that starts sooner than this. */
+const OFFER_MIN_LEAD_MS = 60 * 60_000;
+// A slot is free when no live appointment claims it; an offer on it stays live until then.
+const slotIsFree = (slotId: AnyPgColumn) => sql`NOT EXISTS (SELECT 1 FROM ${appointments} WHERE ${appointments.slotId} = ${slotId} AND ${appointments.deletedAt} IS NULL AND ${appointments.status} <> 'cancelled')`;
+/**
+ * Offers a just-freed time to the people waiting longest, in the transaction that freed it, so an
+ * offer exists exactly when the time is free and needs no worker running. Whoever already holds a
+ * live offer is passed over, so one person ignoring their mail does not shut everyone else out, and
+ * someone moving a visit is only offered a time earlier than the one they have.
+ */
+async function offerFreedSlot(tx: Transaction, clinicId: string, slotId: string) {
+  const [slot] = await tx.select({ providerId: availabilitySlots.providerId, startsAt: availabilitySlots.startsAt }).from(availabilitySlots)
+    .where(and(eq(availabilitySlots.id, slotId), eq(availabilitySlots.clinicId, clinicId), isNull(availabilitySlots.deletedAt))).limit(1);
+  if (!slot || slot.startsAt.getTime() <= Date.now() + OFFER_MIN_LEAD_MS) return;
+  const currentSlot = alias(availabilitySlots, "current_slot");
+  const offeredSlot = alias(availabilitySlots, "offered_slot");
+  const candidates = await tx.select({ id: waitlistEntries.id }).from(waitlistEntries)
+    .leftJoin(appointments, and(eq(appointments.id, waitlistEntries.appointmentId), eq(appointments.clinicId, waitlistEntries.clinicId)))
+    .leftJoin(currentSlot, and(eq(currentSlot.id, appointments.slotId), eq(currentSlot.clinicId, appointments.clinicId)))
+    .where(and(eq(waitlistEntries.clinicId, clinicId), eq(waitlistEntries.providerId, slot.providerId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt),
+      or(isNull(waitlistEntries.appointmentId), gt(currentSlot.startsAt, slot.startsAt)),
+      notExists(tx.select({ one: sql`1` }).from(waitlistOffers).innerJoin(offeredSlot, eq(offeredSlot.id, waitlistOffers.slotId))
+        .where(and(eq(waitlistOffers.entryId, waitlistEntries.id), isNull(offeredSlot.deletedAt), gt(offeredSlot.startsAt, new Date()), slotIsFree(offeredSlot.id))))))
+    .orderBy(asc(waitlistEntries.createdAt)).limit(OFFER_BATCH);
+  if (!candidates.length) return;
+  const offers = await tx.insert(waitlistOffers).values(candidates.map((entry) => ({ clinicId, entryId: entry.id, slotId })))
+    .onConflictDoNothing({ target: [waitlistOffers.entryId, waitlistOffers.slotId] }).returning({ id: waitlistOffers.id });
+  for (const offer of offers) await enqueueOutbox(tx, { clinicId, topic: "waitlist.offered", resourceId: offer.id });
+}
+export async function insertWaitlistEntry(actor: Actor, patientId: string, input: { providerId: string; reason: string; appointmentId?: string }) {
+  try {
+    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.waitlist_joined", async () => {
+      const [entry] = await tx.insert(waitlistEntries).values({ clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id, patientId, providerId: input.providerId, reason: input.reason, appointmentId: input.appointmentId ?? null })
+        .returning({ id: waitlistEntries.id });
+      return entry;
+    }));
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new WaitlistError("You are already on the waiting list for this clinician.");
+    throw error;
+  }
+}
+export async function leaveWaitlistEntry(actor: Actor, patientId: string, entryId: string) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.waitlist_left", async () => {
+    const [entry] = await tx.update(waitlistEntries).set({ status: "left", updatedBy: actor.id })
+      .where(and(eq(waitlistEntries.id, entryId), eq(waitlistEntries.clinicId, actor.clinicId), eq(waitlistEntries.patientId, patientId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt)))
+      .returning({ id: waitlistEntries.id });
+    return entry;
+  }));
+}
+/** A patient's own place in line, with any offer they could still take. */
+export async function listPatientWaitlist(actor: Actor, patientId: string) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.waitlist_read", async () => {
+    const entries = await tx.select({ id: waitlistEntries.id, providerId: waitlistEntries.providerId, appointmentId: waitlistEntries.appointmentId, reason: waitlistEntries.reason, createdAt: waitlistEntries.createdAt })
+      .from(waitlistEntries).where(and(eq(waitlistEntries.clinicId, actor.clinicId), eq(waitlistEntries.patientId, patientId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt)))
+      .orderBy(asc(waitlistEntries.createdAt)).limit(50);
+    if (!entries.length) return { entries, offers: [] };
+    const offers = await tx.select({ id: waitlistOffers.id, entryId: waitlistOffers.entryId, slotId: waitlistOffers.slotId, providerId: availabilitySlots.providerId, startsAt: availabilitySlots.startsAt, endsAt: availabilitySlots.endsAt })
+      .from(waitlistOffers).innerJoin(availabilitySlots, and(eq(availabilitySlots.id, waitlistOffers.slotId), eq(availabilitySlots.clinicId, waitlistOffers.clinicId)))
+      .where(and(inArray(waitlistOffers.entryId, entries.map((entry) => entry.id)), isNull(availabilitySlots.deletedAt), gt(availabilitySlots.startsAt, new Date()), slotIsFree(availabilitySlots.id)))
+      .orderBy(asc(availabilitySlots.startsAt)).limit(20);
+    return { entries, offers };
+  }));
+}
+/**
+ * Takes an offered time for the patient it was offered to. The entry is locked so a double click
+ * acts once; the time itself is decided by active_slot_booking, so of several people accepting
+ * together exactly one succeeds and the rest learn it has gone. Moving a visit frees its old time,
+ * which is offered on to the next person in turn.
+ */
+export async function acceptOffer(actor: Actor, patientId: string, offerId: string) {
+  try {
+    return await getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.waitlist_offer_accepted", async () => {
+      const [offer] = await tx.select({ id: waitlistOffers.id, entryId: waitlistEntries.id, slotId: waitlistOffers.slotId, providerId: waitlistEntries.providerId, appointmentId: waitlistEntries.appointmentId, reason: waitlistEntries.reason })
+        .from(waitlistOffers).innerJoin(waitlistEntries, eq(waitlistEntries.id, waitlistOffers.entryId))
+        .where(and(eq(waitlistOffers.id, offerId), eq(waitlistOffers.clinicId, actor.clinicId), eq(waitlistEntries.patientId, patientId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt)))
+        .for("update", { of: waitlistEntries }).limit(1);
+      if (!offer) throw new WaitlistError("This offer is no longer open.");
+      let appointmentId: string;
+      if (offer.appointmentId) {
+        const [appointment] = await tx.select({ revision: appointments.revision }).from(appointments)
+          .where(and(eq(appointments.id, offer.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.status, "booked"), isNull(appointments.deletedAt))).limit(1);
+        if (!appointment) throw new StaleAppointmentError();
+        appointmentId = (await applyMove(tx, actor, { appointmentId: offer.appointmentId, patientId, revision: appointment.revision, slotId: offer.slotId, providerId: offer.providerId })).id;
+      } else {
+        appointmentId = (await insertBooking(tx, actor, patientId, { slotId: offer.slotId, providerId: offer.providerId, reason: offer.reason })).id;
+      }
+      await tx.update(waitlistEntries).set({ status: "booked", updatedBy: actor.id }).where(eq(waitlistEntries.id, offer.entryId));
+      await tx.update(waitlistOffers).set({ acceptedAt: new Date() }).where(eq(waitlistOffers.id, offer.id));
+      return { appointmentId };
     }));
   } catch (error) {
     if (isUniqueViolation(error)) throw new SlotUnavailableError();
     throw error;
   }
+}
+/** System-level read for the offer mail: nothing clinical, and nothing if the offer has lapsed. */
+export async function findOfferForNotification(clinicId: string, offerId: string) {
+  const [offer] = await getDb().select({ patientId: waitlistEntries.patientId, entryId: waitlistEntries.id, startsAt: availabilitySlots.startsAt })
+    .from(waitlistOffers).innerJoin(waitlistEntries, eq(waitlistEntries.id, waitlistOffers.entryId))
+    .innerJoin(availabilitySlots, and(eq(availabilitySlots.id, waitlistOffers.slotId), eq(availabilitySlots.clinicId, waitlistOffers.clinicId)))
+    .where(and(eq(waitlistOffers.id, offerId), eq(waitlistOffers.clinicId, clinicId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt),
+      isNull(availabilitySlots.deletedAt), gt(availabilitySlots.startsAt, new Date()), slotIsFree(availabilitySlots.id))).limit(1);
+  return offer;
+}
+/** Counts only, for the clinic report. */
+export async function summariseWaitlist(clinicId: string, from: Date, to: Date) {
+  const [[waiting], [offers]] = await Promise.all([
+    getDb().select({ count: sql<number>`count(*)::int` }).from(waitlistEntries).where(and(eq(waitlistEntries.clinicId, clinicId), eq(waitlistEntries.status, "waiting"), isNull(waitlistEntries.deletedAt))),
+    getDb().select({ offered: sql<number>`count(*)::int`, filled: sql<number>`count(${waitlistOffers.acceptedAt})::int` }).from(waitlistOffers)
+      .where(and(eq(waitlistOffers.clinicId, clinicId), gte(waitlistOffers.createdAt, from), lt(waitlistOffers.createdAt, to))),
+  ]);
+  return { waiting: waiting?.count ?? 0, offered: offers?.offered ?? 0, filled: offers?.filled ?? 0 };
+}
+
+/** Called inside the completion transaction, whose audit covers the chart write. */
+export async function insertFollowUp(tx: Transaction, actor: Actor, input: { patientId: string; encounterId: string; dueOn: string; note?: string }) {
+  const [followUp] = await tx.insert(followUps).values({ clinicId: actor.clinicId, createdBy: actor.id, updatedBy: actor.id, patientId: input.patientId, providerId: actor.id, encounterId: input.encounterId, dueOn: input.dueOn, note: input.note ?? null })
+    .returning({ id: followUps.id });
+  await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "follow_up.planned", resourceId: followUp.id });
+  return followUp;
+}
+export async function listPatientFollowUps(actor: Actor, patientId: string) {
+  return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.follow_ups_read", () =>
+    tx.select({ id: followUps.id, providerId: followUps.providerId, dueOn: followUps.dueOn, note: followUps.note }).from(followUps)
+      .where(and(eq(followUps.clinicId, actor.clinicId), eq(followUps.patientId, patientId), eq(followUps.status, "pending"), isNull(followUps.deletedAt)))
+      .orderBy(asc(followUps.dueOn)).limit(20)));
+}
+/** The front desk's list: who and when, without the clinician's note. */
+export async function listFollowUpWorklist(clinicId: string) {
+  return getDb().select({ id: followUps.id, patientId: followUps.patientId, providerId: followUps.providerId, dueOn: followUps.dueOn, remindedAt: followUps.remindedAt,
+    givenName: patients.givenName, surname: patients.surname, mrn: patients.mrn })
+    .from(followUps).innerJoin(patients, and(eq(patients.id, followUps.patientId), eq(patients.clinicId, followUps.clinicId)))
+    .where(and(eq(followUps.clinicId, clinicId), eq(followUps.status, "pending"), isNull(followUps.deletedAt), isNull(patients.deletedAt)))
+    .orderBy(asc(followUps.dueOn), asc(followUps.id)).limit(100);
+}
+export async function findFollowUp(clinicId: string, followUpId: string) {
+  const [followUp] = await getDb().select({ id: followUps.id, clinicId: followUps.clinicId, patientId: followUps.patientId, dueOn: followUps.dueOn, status: followUps.status, remindedAt: followUps.remindedAt }).from(followUps)
+    .where(and(eq(followUps.id, followUpId), eq(followUps.clinicId, clinicId), isNull(followUps.deletedAt))).limit(1);
+  return followUp;
+}
+export async function closeFollowUpRow(actor: Actor, followUpId: string, reason: string) {
+  const [followUp] = await getDb().update(followUps).set({ status: "closed", closedReason: reason, updatedBy: actor.id })
+    .where(and(eq(followUps.id, followUpId), eq(followUps.clinicId, actor.clinicId), eq(followUps.status, "pending"), isNull(followUps.deletedAt)))
+    .returning({ id: followUps.id, patientId: followUps.patientId });
+  return followUp;
+}
+/** A reminder asked for by the front desk goes through the same worker as a scheduled one. */
+export async function requestFollowUpReminder(actor: Actor, followUpId: string, day: string) {
+  await getDb().transaction((tx) => enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "follow_up.remind", resourceId: followUpId, uniqueBy: `follow_up.remind:${followUpId}:${day}` }));
+}
+export async function markFollowUpReminded(clinicId: string, followUpId: string) {
+  await getDb().update(followUps).set({ remindedAt: new Date() }).where(and(eq(followUps.id, followUpId), eq(followUps.clinicId, clinicId)));
+}
+/** System-level read for the worker: follow-ups coming due that nobody has been told about yet. */
+export async function listFollowUpsToRemind(onOrBefore: string) {
+  return getDb().select({ id: followUps.id, clinicId: followUps.clinicId }).from(followUps)
+    .where(and(eq(followUps.status, "pending"), isNull(followUps.remindedAt), isNull(followUps.deletedAt), lte(followUps.dueOn, onOrBefore)))
+    .orderBy(asc(followUps.dueOn)).limit(500);
 }
 export async function listPatientAppointments(actor: Actor, patientId: string, page?: { view: "upcoming" | "past"; number: number; at: Date }) {
   const upcoming = sql`${availabilitySlots.startsAt} > ${page?.at.toISOString() ?? new Date().toISOString()}::timestamptz AND ${appointments.status} NOT IN ('cancelled', 'done', 'no_show')`;
@@ -200,11 +373,19 @@ export async function transitionAppointment(actor: Actor, input: { appointmentId
       .set({ status: input.status, revision: input.revision + 1, updatedBy: actor.id, ...(input.status === "checked_in" ? { checkedInAt: new Date() } : {}) })
       .where(and(eq(appointments.id, input.appointmentId), eq(appointments.clinicId, actor.clinicId), eq(appointments.patientId, input.patientId),
         eq(appointments.revision, input.revision), isNull(appointments.deletedAt)))
-      .returning({ id: appointments.id, revision: appointments.revision });
+      .returning({ id: appointments.id, revision: appointments.revision, slotId: appointments.slotId });
     if (!updated) throw new StaleAppointmentError();
     if (input.status === "cancelled" || input.status === "no_show") {
       await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "appointment.cancelled", resourceId: input.appointmentId });
+      // The visit a follow-up was waiting on is not going to happen, so it needs booking again.
+      await tx.update(followUps).set({ status: "pending", appointmentId: null, updatedBy: actor.id })
+        .where(and(eq(followUps.clinicId, actor.clinicId), eq(followUps.appointmentId, input.appointmentId), eq(followUps.status, "booked")));
+      // There is no longer a visit to move earlier.
+      await tx.update(waitlistEntries).set({ status: "left", updatedBy: actor.id })
+        .where(and(eq(waitlistEntries.clinicId, actor.clinicId), eq(waitlistEntries.appointmentId, input.appointmentId), eq(waitlistEntries.status, "waiting")));
     }
+    // A no-show's time has passed and stays claimed; only a cancellation frees one.
+    if (input.status === "cancelled") await offerFreedSlot(tx, actor.clinicId, updated.slotId);
     // Arrival is when the chart opens. Authority to read, document and prescribe begins with
     // the patient physically here, commits with the check-in itself, and stays revocable.
     if (input.status === "checked_in") {

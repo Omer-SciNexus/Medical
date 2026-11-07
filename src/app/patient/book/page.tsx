@@ -1,21 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CalendarCheck, CheckCircle2, ChevronRight, FileText, Home, TriangleAlert, UserRound } from "lucide-react";
+import { CalendarCheck, CheckCircle2, ChevronRight, FileText, Home, Hourglass, TriangleAlert, UserRound } from "lucide-react";
 import { AppShell } from "@/components/app/shell";
 import { Badge } from "@/components/ui/primitives";
 import { getClinicSettings, listCareProviders } from "@/modules/identity";
-import { listMyAppointments, listProviderAvailability } from "@/modules/scheduling";
+import { listMyAppointments, listMyFollowUps, listMyWaitlist, listProviderAvailability } from "@/modules/scheduling";
 import { listMyVisits } from "@/modules/clinical";
 import { clinicalDate } from "@/lib/format";
 import { clinicTimezone } from "@/lib/clinic-day";
 import { requireActor } from "@/app/session";
 import { Booking } from "./booking";
+import { WaitlistJoin } from "./waitlist-join";
 
 export const metadata: Metadata = { title: "Book a visit", robots: { index: false, follow: false } };
 
-export default async function BookPage({ searchParams }: { searchParams: Promise<{ providerId?: string; confirmed?: string }> }) {
+export default async function BookPage({ searchParams }: { searchParams: Promise<{ providerId?: string; confirmed?: string; followUp?: string }> }) {
   const actor = await requireActor(["patient"]);
-  const { providerId, confirmed } = await searchParams;
+  const { providerId, confirmed, followUp: followUpId } = await searchParams;
   const timeZone = (await getClinicSettings(actor).catch(() => null))?.timezone ?? clinicTimezone();
   const breadcrumb = <><span className="breadcrumb-app"><Home /></span><span className="breadcrumb-first">Your care</span><ChevronRight /><span>Book a visit</span></>;
   const shell = (children: React.ReactNode, clinicName: string) =>
@@ -23,9 +24,12 @@ export default async function BookPage({ searchParams }: { searchParams: Promise
 
   let clinicName = "Your clinic";
   try {
-    const [clinic, providers, appointments, visits] = await Promise.all([
-      getClinicSettings(actor), listCareProviders(actor), listMyAppointments(actor), listMyVisits(actor),
+    const [clinic, providers, appointments, visits, followUps, waitlist] = await Promise.all([
+      getClinicSettings(actor), listCareProviders(actor), listMyAppointments(actor), listMyVisits(actor), listMyFollowUps(actor), listMyWaitlist(actor),
     ]);
+    // Arriving from a follow-up, the visit's reason is already known: only their own follow-up counts.
+    const followUp = followUps.find((candidate) => candidate.id === followUpId && candidate.providerId === providerId);
+    const initialReason = followUp ? (followUp.note ? `Follow-up: ${followUp.note}` : "Follow-up visit") : "";
     clinicName = clinic?.name ?? clinicName;
     const confirmedAppointment = appointments.find((appointment) => appointment.id === confirmed && appointment.status === "booked" && appointment.startsAt.getTime() > Date.now());
     const provider = providers.find((candidate) => candidate.id === providerId) ?? null;
@@ -59,8 +63,11 @@ export default async function BookPage({ searchParams }: { searchParams: Promise
       {provider ? <section className="section">
         <div className="section-header"><div className="section-heading"><div>
           <span className="eyebrow icon-label"><CalendarCheck /> Step 2</span><h2 style={{ marginTop: 6 }}>Reason and time</h2></div></div></div>
-        <Booking providerId={provider.id} providerName={provider.displayName} timeZone={timeZone}
+        <Booking key={`${provider.id}:${followUp?.id ?? ""}`} providerId={provider.id} providerName={provider.displayName} timeZone={timeZone} initialReason={initialReason}
           slots={slots.map((slot) => ({ id: slot.id, startsAt: slot.startsAt.toISOString(), endsAt: slot.endsAt.toISOString() }))} />
+        {waitlist.entries.some((entry) => entry.providerId === provider.id)
+          ? <p className="booking-empty" style={{ marginTop: 16 }}><Hourglass /> You are on the waiting list for {provider.displayName}. <Link href="/patient/appointments">See your appointments</Link></p>
+          : <WaitlistJoin key={provider.id} providerId={provider.id} providerName={provider.displayName} noTimes={!slots.length} initialReason={initialReason} />}
       </section> : null}
 
       {upcoming.length ? <section className="section">

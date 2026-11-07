@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { assertSameOrigin, invitePatientPortal, resendPatientPortalInvitation, listPortalLinks, type Actor } from "@/modules/identity";
 import { advanceAppointment, correctPatient, getPatientDetails, PossibleDuplicateError, listPatients, registerPatient, searchPatients } from "@/modules/scheduling";
-import { declineAppointmentRequest, findRequestMatches, linkAppointmentRequestToPatient, registerAndInviteFromRequest } from "@/modules/scheduling";
+import { closeFollowUp, sendFollowUpReminderNow, declineAppointmentRequest, findRequestMatches, linkAppointmentRequestToPatient, registerAndInviteFromRequest } from "@/modules/scheduling";
 import { patientAge } from "@/modules/clinical";
 import { publishChange } from "@/platform/realtime";
 import { requireActor } from "@/app/session";
@@ -168,5 +168,24 @@ export async function advanceFromBoardAction(_previous: ActionState, form: FormD
     await publishChange(actor.clinicId, "clinic:queue");
   } catch (error) { return toActionState(error); }
   revalidatePath("/staff/board");
+  return { ok: true };
+}
+const FOLLOW_UPS = "/staff/follow-ups";
+export async function remindFollowUpAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    await sendFollowUpReminderNow(actor, { followUpId: field(form, "followUpId") });
+  } catch (error) { return toActionState(error); }
+  revalidatePath(FOLLOW_UPS);
+  return { ok: true, notice: "Reminder queued. It goes out as soon as the worker picks it up." };
+}
+export async function closeFollowUpAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["staff", "admin"]);
+    await closeFollowUp(actor, { followUpId: field(form, "followUpId"), reason: field(form, "reason") });
+  } catch (error) { return toActionState(error); }
+  revalidatePath(FOLLOW_UPS);
   return { ok: true };
 }

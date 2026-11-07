@@ -1,6 +1,6 @@
 import "server-only";
 import { listPeople, type Actor } from "@/modules/identity";
-import { getClinicianQueue, getWaitingRoomBoard, getScheduleAuthoring, listMyAppointments } from "@/modules/scheduling";
+import { getClinicianQueue, getWaitingRoomBoard, getScheduleAuthoring, listMyAppointments, listMyFollowUps, listMyWaitlist } from "@/modules/scheduling";
 import { listMyVisits } from "@/modules/clinical";
 import type { DashboardSummary } from "@/components/app/dashboard-overview";
 
@@ -33,17 +33,25 @@ export async function readDashboardSummary(actor: Actor, timeZone: string, now =
     };
   }
   if (actor.role === "patient") {
-    const [appointments, visits] = await Promise.all([listMyAppointments(actor), listMyVisits(actor)]);
+    const [appointments, visits, followUps, waitlist] = await Promise.all([listMyAppointments(actor), listMyVisits(actor), listMyFollowUps(actor), listMyWaitlist(actor)]);
     // A visit under way (or a patient running late) still belongs here until its slot ends.
     const upcoming = appointments.filter(item => item.endsAt.getTime() > now.getTime() && !terminal.has(item.status)).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
     const published = visits.filter(item => item.publishedAt).sort((a, b) => b.publishedAt!.getTime() - a.publishedAt!.getTime());
     const next = upcoming[0];
+    const offer = waitlist.offers[0];
+    const followUp = followUps[0];
+    // A time that may go at any moment comes first, then what the clinician asked for.
+    const needsAction = offer
+      ? { title: "A time has opened up.", description: `A time on ${new Intl.DateTimeFormat("en-GB", { timeZone, dateStyle: "full", timeStyle: "short" }).format(offer.startsAt)} (${timeZone}) is free. It goes to the first person to accept it.`, href: "/patient/appointments", action: "See this time" }
+      : followUp
+        ? { title: "Time to book your follow-up.", description: `Your clinician would like to see you again by ${new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", dateStyle: "long" }).format(new Date(`${followUp.dueOn}T12:00:00Z`))}. Choose a time that suits you.`, href: "/patient/appointments", action: "Book your follow-up" }
+        : null;
     return {
       metrics: [
         { label: "Upcoming visits", value: upcoming.length, hint: "From your appointment records", href: "/patient/appointments", icon: "calendar" },
         { label: "Published summaries", value: published.length, hint: "Available in your recent visits", href: published[0] ? `/patient/visits/${published[0].id}` : "/patient/appointments", icon: "document" },
       ],
-      focus: next ? { title: "Your next visit, in view.", description: `Your appointment is ${new Intl.DateTimeFormat("en-GB", { timeZone, dateStyle: "full", timeStyle: "short" }).format(next.startsAt)} (${timeZone}). Review the details before you arrive.`, href: "/patient/appointments", action: "View appointment" } : { title: "A little time for your health.", description: "You have no upcoming appointments. Find a clinician and choose a time that fits your day.", href: "/patient/book", action: "Book a visit" },
+      focus: needsAction ?? (next ? { title: "Your next visit, in view.", description: `Your appointment is ${new Intl.DateTimeFormat("en-GB", { timeZone, dateStyle: "full", timeStyle: "short" }).format(next.startsAt)} (${timeZone}). Review the details before you arrive.`, href: "/patient/appointments", action: "View appointment" } : { title: "A little time for your health.", description: "You have no upcoming appointments. Find a clinician and choose a time that fits your day.", href: "/patient/book", action: "Book a visit" }),
       panel: { title: "Coming up for you", description: `Upcoming appointments · ${timeZone}`, href: "/patient/appointments", action: "All appointments", emptyTitle: "Nothing on your calendar yet", emptyDescription: "When you book a visit, its time and status will appear here. Use Book a visit to find an available appointment." },
       distribution: null,
       rows: upcoming.slice(0, 4).map(item => ({ id: item.id, title: "Clinic appointment", detail: `${formatTime(item.startsAt)}–${formatTime(item.endsAt)}`, time: new Intl.DateTimeFormat("en-GB", { timeZone, day: "numeric", month: "short" }).format(item.startsAt), caption: new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "long" }).format(item.startsAt), status: statusLabels[item.status] ?? item.status, tone: "neutral", href: "/patient/appointments" })),

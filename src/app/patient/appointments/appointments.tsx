@@ -3,10 +3,10 @@
 import * as React from "react";
 import { useActionState } from "react";
 import Link from "next/link";
-import { CalendarCheck, CalendarX, Clock, Info, Loader2, UserRound } from "lucide-react";
+import { CalendarCheck, CalendarX, Clock, Hourglass, Info, Loader2, UserRound } from "lucide-react";
 import { Badge, Button } from "@/components/ui/primitives";
 import { idleAction } from "@/lib/action-state";
-import { cancelAppointmentAction, rescheduleAppointmentAction } from "@/app/patient/actions";
+import { cancelAppointmentAction, joinWaitlistAction, rescheduleAppointmentAction } from "@/app/patient/actions";
 
 type Appointment = { id: string; reason: string; preparation: string; status: string; revision: number; providerId: string; startsAt: string; endsAt: string };
 type Slot = { id: string; startsAt: string; endsAt: string };
@@ -15,14 +15,15 @@ const statusTone = (status: string) => status === "cancelled" || status === "no_
 const dayLabel = (iso: string, timeZone: string) => new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "long", day: "numeric", month: "long" }).format(new Date(iso));
 const timeLabel = (iso: string, timeZone: string) => new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso));
 
-export function Appointments({ appointments, providers, moving, options, timeZone, page, view }: {
-  page: number; view: "upcoming" | "past"; appointments: Appointment[]; providers: { id: string; displayName: string }[];
+export function Appointments({ appointments, providers, moving, options, timeZone, page, view, waitlistedProviders }: {
+  page: number; view: "upcoming" | "past"; appointments: Appointment[]; providers: { id: string; displayName: string }[]; waitlistedProviders: string[];
   moving: { id: string; revision: number; providerId: string } | null; options: Slot[]; timeZone: string;
 }) {
   const [cancelState, cancel, cancelPending] = useActionState(cancelAppointmentAction, idleAction);
   const [moveState, reschedule, movePending] = useActionState(rescheduleAppointmentAction, idleAction);
+  const [earlierState, askForEarlier, earlierPending] = useActionState(joinWaitlistAction, idleAction);
   const [confirming, setConfirming] = React.useState<string | null>(null);
-  const error = [cancelState, moveState].find((state) => state.error)?.error;
+  const error = [cancelState, moveState, earlierState].find((state) => state.error)?.error;
   const nameOf = (providerId: string) => providers.find((provider) => provider.id === providerId)?.displayName ?? "Your clinician";
   const now = Date.now();
   const upcoming = appointments.filter((appointment) => Date.parse(appointment.startsAt) > now && appointment.status !== "cancelled" && appointment.status !== "done" && appointment.status !== "no_show");
@@ -50,6 +51,10 @@ export function Appointments({ appointments, providers, moving, options, timeZon
             {moving?.id === appointment.id
               ? <span className="field-hint">Choose a new time below.</span>
               : <Link className="button button-secondary button-small" href={`/patient/appointments?page=${page}&move=${appointment.id}`}><CalendarCheck />Move this visit</Link>}
+            {waitlistedProviders.includes(appointment.providerId) ? null : <form action={askForEarlier}>
+              <input type="hidden" name="appointmentId" value={appointment.id} /><input type="hidden" name="providerId" value={appointment.providerId} />
+              <Button type="submit" size="small" variant="ghost" disabled={earlierPending}>{earlierPending ? <Loader2 /> : <Hourglass />}Tell me if an earlier time opens</Button>
+            </form>}
             {/* Two steps on purpose: cancelling frees the time for someone else immediately. */}
             {confirming === appointment.id ? <form action={cancel} className="row-actions">
               <input type="hidden" name="appointmentId" value={appointment.id} /><input type="hidden" name="revision" value={appointment.revision} />

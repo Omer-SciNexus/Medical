@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, CalendarDays, CalendarPlus, CalendarRange, CheckCheck, ChevronRight, ClipboardList, Clock3, FileText, Inbox, Receipt, ShieldCheck, Stethoscope, Users } from "lucide-react";
+import { ArrowRight, ArrowUpRight, CalendarClock, CalendarDays, CalendarPlus, CalendarRange, CheckCheck, ChevronRight, ClipboardList, Clock3, Eye, FileText, Inbox, Receipt, ShieldCheck, Stethoscope, Users } from "lucide-react";
 import type { Actor } from "@/modules/identity";
 import { greetingName } from "@/lib/format";
 
@@ -35,6 +35,7 @@ const workspaces = {
     shortcuts: [
       { href: "/staff/board", title: "Waiting room", text: "Follow arrivals and visit progress", icon: ClipboardList },
       { href: "/staff/patients", title: "Find a patient", text: "Registrations and portal access", icon: Users },
+      { href: "/staff/follow-ups", title: "Follow-ups", text: "Patients who still need to book", icon: CalendarClock },
       { href: "/admin/services", title: "Invoices & payments", text: "Review charges and record payments", icon: Receipt },
     ],
   },
@@ -43,6 +44,7 @@ const workspaces = {
     shortcuts: [
       { href: "/patient/book", title: "Book a visit", text: "Find a clinician and an available time", icon: CalendarPlus },
       { href: "/patient/appointments", title: "Your appointments", text: "Review a visit or choose a new time", icon: CalendarDays },
+      { href: "/patient/access", title: "Who viewed my record", text: "See who opened your chart, and why", icon: Eye },
       { href: "/account/security", title: "Account & security", text: "Keep your sign-in details up to date", icon: ShieldCheck },
     ],
   },

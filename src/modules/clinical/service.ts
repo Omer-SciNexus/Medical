@@ -5,7 +5,8 @@ import { getDb } from "@/platform/db";
 import { headObject, objectStoreConfigured, presignDownload, presignUpload } from "@/platform/objects";
 import { auditedPatientOperation, getClinicSettings, hasFreshTotp, recordScopedEvent, type Actor } from "@/modules/identity";
 import { addVisitCharge, getPriceList, getVisitInvoice, removeVisitCharge } from "@/modules/billing";
-import { getAppointmentForCare, getPatientIdentity } from "@/modules/scheduling";
+import { followUpPlanSchema, getAppointmentForCare, getPatientIdentity } from "@/modules/scheduling";
+import { addClinicDays, todayInZone } from "@/lib/clinic-day";
 import { allergySchema, amendNoteSchema, chargeLineReferenceSchema, documentIdSchema, documentRequestSchema, completeEncounterSchema, draftRequestSchema, EncounterStateError, issuePrescriptionSchema, medicationSearchSchema, noteDraftSchema, openEncounterSchema, prescriptionIdSchema, prescriptionSchema, problemSchema, problemStatusSchema, signNoteSchema, vitalsSchema } from "./validators";
 import { draftVisitNote } from "./assist";
 import { checkPrescribingSafety, safetyProviderIsFixture, safetyProviderName, FIXTURE_SOURCE } from "./safety";
@@ -261,10 +262,12 @@ export async function requestDocumentDownload(actor: Actor, input: unknown) {
 export async function finishEncounter(actor: Actor, input: unknown) {
   requireClinician(actor);
   const request = completeEncounterSchema.parse(input);
+  const plan = followUpPlanSchema.parse(input);
   const encounter = await requireEncounter(actor, request.encounterId);
   const clinic = await getClinicSettings(actor);
   if (!clinic) throw new EncounterStateError("This clinic could not be loaded.");
-  return completeEncounter(actor, { encounterId: encounter.id, patientId: encounter.patientId, summary: request.summary, currency: clinic.currency });
+  const followUp = plan.followUpDays ? { dueOn: addClinicDays(todayInZone(clinic.timezone), plan.followUpDays), note: plan.followUpNote } : undefined;
+  return completeEncounter(actor, { encounterId: encounter.id, patientId: encounter.patientId, summary: request.summary, currency: clinic.currency, followUp });
 }
 // Drafting assistance reads the chart under normal authorization and records that it ran.
 // The returned text is a draft only; the clinician edits it and their signature is what counts.

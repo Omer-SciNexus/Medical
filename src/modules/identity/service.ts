@@ -6,11 +6,12 @@ import { sendMail } from "@/platform/mailer";
 import { logOperational } from "@/platform/log";
 import { isUniqueViolation } from "@/platform/errors";
 import { resolveImminentVisit, resolvePatientScope } from "@/modules/scheduling";
-import { actorSchema, auditFilterSchema, emergencySchema, invitationIdSchema, inviteSchema, portalInviteSchema, purposeSchema, relationshipIdSchema, userIdSchema, type Actor, type AccessPurpose } from "./validators";
+import { actorSchema, auditFilterSchema, emergencySchema, recordAccessQuerySchema, invitationIdSchema, inviteSchema, portalInviteSchema, purposeSchema, relationshipIdSchema, userIdSchema, type Actor, type AccessPurpose } from "./validators";
 import { roleAllowsPurpose, hasFreshTotp } from "./policy";
+import { summariseRecordAccess, RECORD_ACCESS_PAGE_EVENTS } from "./record-access";
 import { digest, newToken } from "./crypto";
 import { revokeAllSessions } from "./sessions";
-import { appendAudit, clearMfaEnrollment, createEmergencyRelationship, createInvitation, findClinicByRequestCode, findClinicSettings, findClinicUser, findPortalAccount, findUserByEmail, findUserById, hasCareRelationship, insertCareRelationships, listAuditEvents, listClinicians, listClinicPeople, listInvitations, listLiveRelationships, listPendingPatientInvitations, listPortalAccountsFor, revokeInvitation, revokeRelationship, rotateInvitation, setUserActive, verifyAuditChainFrom, latestCheckpoint, summariseAuditOutcomes, exportAuditEvents } from "./repository";
+import { appendAudit, clearMfaEnrollment, createEmergencyRelationship, createInvitation, findClinicByRequestCode, findClinicSettings, findClinicUser, findPortalAccount, findUserByEmail, findUserById, hasCareRelationship, insertCareRelationships, listAuditEvents, listClinicians, listNamesOfUsers, listRecordAccessEvents, listClinicPeople, listInvitations, listLiveRelationships, listPendingPatientInvitations, listPortalAccountsFor, revokeInvitation, revokeRelationship, rotateInvitation, setUserActive, verifyAuditChainFrom, latestCheckpoint, summariseAuditOutcomes, exportAuditEvents } from "./repository";
 
 export class AccessDeniedError extends Error {
   constructor() { super("You do not have permission to access this record."); this.name = "AccessDeniedError"; }
@@ -115,6 +116,11 @@ export async function describeRequestClinic(clinicId: unknown) {
 /** The same, reached by the short code a patient types; the caller has already normalised it. */
 export async function describeRequestClinicByCode(requestCode: string) {
   return await findClinicByRequestCode(requestCode) ?? null;
+}
+/** For mail the worker sends with no person signed in: how to name the clinic and tell its time. */
+export async function describeNotificationClinic(clinicId: string) {
+  const clinic = await findClinicSettings(z.uuid().parse(clinicId));
+  return clinic ? { name: clinic.name, timezone: clinic.timezone } : null;
 }
 export async function getClinicSettings(inputActor: Actor) {
   const actor = actorSchema.parse(inputActor);
@@ -310,6 +316,20 @@ export async function readAuditLog(inputActor: Actor, input: unknown) {
     summariseAuditOutcomes(actor.clinicId, new Date(Date.now() - 30 * 86_400_000)),
   ]);
   return { events, integrity, outcomes };
+}
+
+/**
+ * A patient's own view of who has been in their record, read from the same tamper-evident log the
+ * clinic's administrator reviews. Reading it is recorded like any other read of the log.
+ */
+export async function getMyRecordAccess(inputActor: Actor, input: unknown) {
+  const actor = actorSchema.parse(inputActor);
+  if (actor.role !== "patient" || !actor.patientId || !await currentActorIsValid(actor)) throw new AccessDeniedError();
+  const { before } = recordAccessQuerySchema.parse(input);
+  await appendAudit({ clinicId: actor.clinicId, actorId: actor.id, patientId: actor.patientId, action: "identity.record_access_viewed", purpose: "patient.view", outcome: "allowed" });
+  const events = await listRecordAccessEvents(actor.clinicId, actor.patientId, actor.id, { before, limit: RECORD_ACCESS_PAGE_EVENTS });
+  const people = await listNamesOfUsers(actor.clinicId, [...new Set(events.flatMap((event) => event.actorId ? [event.actorId] : []))]);
+  return { entries: summariseRecordAccess(events, people), olderThan: events.length === RECORD_ACCESS_PAGE_EVENTS ? events[events.length - 1].seq : null };
 }
 
 /** Financial administration is clinic-scoped and does not grant any clinical chart purpose. */

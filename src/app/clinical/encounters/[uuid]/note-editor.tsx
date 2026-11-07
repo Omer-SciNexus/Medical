@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { CircleCheck, FileSignature, Loader2, PenLine, Receipt, RefreshCw, Sparkles, TriangleAlert } from "lucide-react";
-import { Button, Field, Modal, Textarea } from "@/components/ui/primitives";
+import { Button, Field, Input, Modal, Textarea } from "@/components/ui/primitives";
 import { ConfirmForm } from "@/components/ui/confirm-form";
 import { money } from "@/lib/format";
 import { NoteDraft } from "@/lib/note-draft";
@@ -14,8 +14,8 @@ type Note = { id: string; version: number; revision: number; content: string; st
 type Encounter = { id: string; status: string; summary: string | null; publishedAt: string | null };
 const AUTOSAVE_MS = 1200;
 
-export function NoteEditor({ note, encounter, charge, fee, aiEnabled }: {
-  note: Note; encounter: Encounter; charge: { amountMinor: number; currency: string } | null; fee: { amountMinor: number; currency: string }; aiEnabled: boolean;
+export function NoteEditor({ note, encounter, charge, fee, aiEnabled, followUpIntervals }: {
+  note: Note; encounter: Encounter; charge: { amountMinor: number; currency: string } | null; fee: { amountMinor: number; currency: string }; aiEnabled: boolean; followUpIntervals: { days: number; label: string }[];
 }) {
   const [draft] = React.useState(() => new NoteDraft(note.content, note.revision, async (content, revision) => {
     const form = new FormData();
@@ -139,6 +139,17 @@ export function NoteEditor({ note, encounter, charge, fee, aiEnabled }: {
         <Field label="Patient visit summary" id="visit-summary" error={completeState.errors?.summary?.[0]} hint="Plain language, written by you. This is the text the patient sees.">
           <Textarea id="visit-summary" name="summary" rows={5} required minLength={20} defaultValue={completeState.values?.summary} />
         </Field>
+        <div className="follow-up-plan">
+          <Field label="See this patient again?" id="follow-up-days" error={completeState.errors?.followUpDays?.[0]} hint="They are reminded a week before, and the front desk sees if they have not booked.">
+            <select id="follow-up-days" name="followUpDays" className="input" defaultValue={completeState.values?.followUpDays ?? ""}>
+              <option value="">No follow-up needed</option>
+              {followUpIntervals.map((interval) => <option key={interval.days} value={interval.days}>{interval.label}</option>)}
+            </select>
+          </Field>
+          <Field label="What is it for? (optional)" id="follow-up-note" error={completeState.errors?.followUpNote?.[0]} hint="Shown only to the patient, in their portal.">
+            <Input id="follow-up-note" name="followUpNote" maxLength={140} defaultValue={completeState.values?.followUpNote} placeholder="For example: recheck your blood pressure" />
+          </Field>
+        </div>
         {completeState.error ? <p className="field-error" role="alert">{completeState.error}</p> : null}
         <div className="form-footer"><span className="save-status">Invoice so far: {money(fee.amountMinor, fee.currency)}, charged once per visit.</span>
           <Button type="submit" disabled={completePending}>{completePending ? <Loader2 /> : <CircleCheck />} Complete visit</Button></div>
@@ -148,6 +159,7 @@ export function NoteEditor({ note, encounter, charge, fee, aiEnabled }: {
     {encounter.status === "completed" ? <section className="complete-visit" data-done="true">
       <h3><CircleCheck /> Visit completed</h3>
       <p className="muted">The summary is published to the patient. {charge ? `An invoice of ${money(charge.amountMinor, charge.currency)} was recorded.` : "No invoice was found for this visit."}</p>
+      {completeState.notice ? <p className="muted" role="status">{completeState.notice}</p> : null}
       {encounter.summary ? <div className="review-record"><span className="eyebrow">Published summary</span><p>{encounter.summary}</p></div> : null}
     </section> : null}
   </div>;

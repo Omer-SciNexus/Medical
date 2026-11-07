@@ -12,6 +12,7 @@ import { closeRuntimeConnections, validateRuntime } from "../src/platform/runtim
 
 const DISPATCH_INTERVAL_MS = Number(process.env.OUTBOX_INTERVAL_MS ?? 5_000);
 const AUDIT_PASS_INTERVAL_MS = Number(process.env.AUDIT_FULL_PASS_MS ?? 24 * 3_600_000);
+const FOLLOW_UP_SWEEP_INTERVAL_MS = Number(process.env.FOLLOW_UP_SWEEP_MS ?? 3_600_000);
 
 /**
  * The process the outbox has always been written for. Two halves:
@@ -49,6 +50,8 @@ export async function startWorker() {
   // The chain's full verification is a schedule, not a reaction to anything: one job id, so
   // restarting the worker replaces the standing schedule rather than stacking another.
   await getJobQueue().add("audit.verify_chain", "audit-verify-chain-daily", {}, { repeatEveryMs: AUDIT_PASS_INTERVAL_MS });
+  // Follow-ups planned months ahead come due with nothing else to wake them.
+  await getJobQueue().add("follow_up.sweep", "follow-up-sweep-hourly", {}, { repeatEveryMs: FOLLOW_UP_SWEEP_INTERVAL_MS });
   const stop = async () => {
     stopped = true;
     await dispatching;

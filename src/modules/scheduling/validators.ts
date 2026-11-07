@@ -76,6 +76,33 @@ export const appointmentRequestIdSchema = z.object({ requestId: z.uuid() });
 export const linkAppointmentRequestSchema = appointmentRequestIdSchema.extend({ patientId: z.uuid("Choose a patient.") });
 export const declineAppointmentRequestSchema = appointmentRequestIdSchema.extend({ note: optionalText(200, "Use no more than 200 characters.") });
 
+// Offered to the clinician when they complete a visit. Choosing nothing plans nothing.
+export const FOLLOW_UP_INTERVALS = [
+  { days: 7, label: "In 1 week" }, { days: 14, label: "In 2 weeks" }, { days: 30, label: "In 1 month" },
+  { days: 90, label: "In 3 months" }, { days: 180, label: "In 6 months" }, { days: 365, label: "In 1 year" },
+] as const;
+export const followUpPlanSchema = z.object({
+  followUpDays: z.union([z.literal(""), z.coerce.number().refine((days) => FOLLOW_UP_INTERVALS.some((interval) => interval.days === days), "Choose when to see them again.")]).optional(),
+  followUpNote: optionalText(140, "Use no more than 140 characters."),
+}).refine((plan) => Boolean(plan.followUpDays) || !plan.followUpNote, { path: ["followUpDays"], message: "Choose when to see them again, or remove the note." });
+export const followUpIdSchema = z.object({ followUpId: z.uuid() });
+export const FOLLOW_UP_CLOSE_REASONS = ["Seen elsewhere", "Patient declined", "No longer needed"] as const;
+export const closeFollowUpSchema = followUpIdSchema.extend({ reason: z.enum(FOLLOW_UP_CLOSE_REASONS, { error: "Choose why this follow-up is closing." }) });
+
+export const joinWaitlistSchema = z.object({
+  providerId: z.uuid(),
+  reason: bookingSchema.shape.reason.optional(),
+  appointmentId: z.uuid().optional(),
+}).refine((request) => request.appointmentId || request.reason, { path: ["reason"], message: "Describe the reason for your visit." });
+export const waitlistEntryIdSchema = z.object({ entryId: z.uuid() });
+export const waitlistOfferIdSchema = z.object({ offerId: z.uuid() });
+
+export class WaitlistError extends Error {
+  constructor(message: string) { super(message); this.name = "WaitlistError"; }
+}
+export class FollowUpError extends Error {
+  constructor(message: string) { super(message); this.name = "FollowUpError"; }
+}
 export class PatientRegistrationError extends Error {
   constructor(message: string) { super(message); this.name = "PatientRegistrationError"; }
 }

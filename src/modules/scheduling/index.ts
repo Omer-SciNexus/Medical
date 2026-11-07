@@ -4,7 +4,9 @@ export { registerPatient, searchPatients, listPatients, getPatientDetails, corre
 export { reschedulePatientAppointment, listMyAppointmentOptions } from "./service";
 export { getWaitingRoomBoard, getClinicReport } from "./service";
 export { findRequestClinic, submitAppointmentRequest, confirmAppointmentRequest, listAppointmentRequests, findRequestMatches, linkAppointmentRequestToPatient, registerAndInviteFromRequest, declineAppointmentRequest } from "./service";
-export { findReminderTarget, listReminderWindow } from "./repository";
-export { SlotUnavailableError, StaleAppointmentError, ScheduleAuthoringError, PatientRegistrationError, PossibleDuplicateError, AppointmentRequestError, appointmentRequestSchema, formatRequestCode, appointmentStatusSchema, bookingSchema, transitionSchema } from "./validators";
+export { planFollowUpInTransaction, listMyFollowUps, getFollowUpWorklist, closeFollowUp, sendFollowUpReminderNow } from "./service";
+export { joinWaitlist, leaveWaitlist, listMyWaitlist, acceptWaitlistOffer } from "./service";
+export { findReminderTarget, listReminderWindow, findFollowUp, listFollowUpsToRemind, markFollowUpReminded, findOfferForNotification } from "./repository";
+export { SlotUnavailableError, StaleAppointmentError, ScheduleAuthoringError, PatientRegistrationError, PossibleDuplicateError, AppointmentRequestError, WaitlistError, FollowUpError, appointmentRequestSchema, formatRequestCode, appointmentStatusSchema, bookingSchema, transitionSchema, followUpPlanSchema, FOLLOW_UP_INTERVALS, FOLLOW_UP_CLOSE_REASONS } from "./validators";
 export { waitingMinutes, canTransition, roleMayTransition } from "./policy";
 export type { AppointmentStatus } from "./validators";

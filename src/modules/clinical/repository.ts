@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { getDb, type Transaction } from "@/platform/db";
 import { auditedPatientOperation, type Actor } from "@/modules/identity";
-import { beginAppointmentInTransaction, completeAppointmentInTransaction } from "@/modules/scheduling";
+import { beginAppointmentInTransaction, completeAppointmentInTransaction, planFollowUpInTransaction } from "@/modules/scheduling";
 import { ensureVisitCharged, getEncounterCharge } from "@/modules/billing";
 import { enqueueOutbox } from "@/platform/outbox";
 import { allergies, documents, encounters, medications, noteVersions, observations, prescriptions, problems } from "./schema";
@@ -82,7 +82,7 @@ export async function amendNoteVersion(actor: Actor, input: { encounterId: strin
     return created;
   }));
 }
-export async function completeEncounter(actor: Actor, input: { encounterId: string; patientId: string; summary: string; currency: string }) {
+export async function completeEncounter(actor: Actor, input: { encounterId: string; patientId: string; summary: string; currency: string; followUp?: { dueOn: string; note?: string } }) {
   return getDb().transaction((tx) => auditedPatientOperation(tx, actor, input.patientId, "clinical.write", "clinical.encounter_completed", async () => {
     const [encounter] = await tx.select(encounterFields).from(encounters)
       .where(and(eq(encounters.id, input.encounterId), eq(encounters.clinicId, actor.clinicId), isNull(encounters.deletedAt))).for("update").limit(1);
@@ -98,6 +98,7 @@ export async function completeEncounter(actor: Actor, input: { encounterId: stri
       .where(and(eq(encounters.id, encounter.id), eq(encounters.clinicId, actor.clinicId), eq(encounters.status, "in_progress"))).returning(encounterFields);
     if (!completed) throw new EncounterStateError("This visit was completed elsewhere. Reload to see its current state.");
     await completeAppointmentInTransaction(tx, actor, { appointmentId: encounter.appointmentId, patientId: input.patientId });
+    if (input.followUp) await planFollowUpInTransaction(tx, actor, { patientId: input.patientId, encounterId: encounter.id, ...input.followUp });
     await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "encounter.completed", resourceId: encounter.id });
     await enqueueOutbox(tx, { clinicId: actor.clinicId, topic: "visit_summary.published", resourceId: encounter.id });
     return { encounter: completed, charge, repeated: false };

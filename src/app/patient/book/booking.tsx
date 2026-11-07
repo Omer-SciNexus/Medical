@@ -10,11 +10,11 @@ import { bookAppointmentAction } from "@/app/patient/actions";
 
 type Slot = { id: string; startsAt: string; endsAt: string };
 
-export function Booking({ providerId, providerName, slots, timeZone }: { providerId: string; providerName: string; slots: Slot[]; timeZone: string }) {
+export function Booking({ providerId, providerName, slots, timeZone, initialReason = "" }: { providerId: string; providerName: string; slots: Slot[]; timeZone: string; initialReason?: string }) {
   const router = useRouter();
   const [state, book, pending] = useActionState(bookAppointmentAction, idleAction);
   const [slotId, setSlotId] = React.useState<string | null>(null);
-  const [reason, setReason] = React.useState("");
+  const [reason, setReason] = React.useState(initialReason);
   const taken = state.code === "slot_taken";
 
   // On a conflict the chosen provider and reason are kept; only the time is released and the
@@ -46,7 +46,7 @@ export function Booking({ providerId, providerName, slots, timeZone }: { provide
     <div className="booking-times" role="radiogroup" aria-label="Available appointment times">
       <h3>Choose a time with {providerName}</h3>
       {taken ? <p className="booking-alert" role="alert"><TriangleAlert /> {state.error} Your reason has been kept.</p> : null}
-      {!slots.length ? <p className="booking-empty"><CalendarX /> No times are open with this clinician in the next three weeks. Try another clinician.</p>
+      {!slots.length ? <p className="booking-empty"><CalendarX /> No times are open with this clinician in the next three weeks. Try another clinician, or join the waiting list below.</p>
         : [...byDay.entries()].map(([day, daySlots]) => <div key={day} className="booking-day">
           <span className="eyebrow">{day}</span>
           <div className="time-options">

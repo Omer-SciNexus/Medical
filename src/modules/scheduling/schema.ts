@@ -79,3 +79,51 @@ export const appointmentRequests = pgTable("appointment_requests", {
   linkedPatientId: uuid("linked_patient_id"),
 }, (t) => [index("appointment_request_queue").on(t.clinicId, t.status, t.createdAt),
   check("appointment_request_settled", sql`(${t.status} = 'pending') = (${t.resolvedAt} IS NULL AND ${t.resolvedBy} IS NULL)`)]);
+
+export const followUpStatus = pgEnum("follow_up_status", ["pending", "booked", "closed"]);
+
+// A clinician asking to see a patient again. Booking with that clinician satisfies it, and
+// cancelling or missing that booking reopens it, so nobody drops out of care unnoticed.
+export const followUps = pgTable("follow_ups", {
+  ...recordColumns(),
+  patientId: uuid("patient_id").notNull(),
+  providerId: uuid("provider_id").notNull(),
+  encounterId: uuid("encounter_id").notNull(),
+  dueOn: date("due_on").notNull(),
+  /** Written for the patient. It may be clinical, so it stays out of mail and the front-desk list. */
+  note: text("note"),
+  status: followUpStatus("status").default("pending").notNull(),
+  appointmentId: uuid("appointment_id"),
+  remindedAt: timestamp("reminded_at", { withTimezone: true }),
+  closedReason: text("closed_reason"),
+}, (t) => [uniqueIndex("follow_up_encounter").on(t.encounterId), index("follow_up_worklist").on(t.clinicId, t.status, t.dueOn), index("follow_up_patient").on(t.clinicId, t.patientId, t.status),
+  index("follow_up_appointment").on(t.appointmentId),
+  check("follow_up_booking", sql`(${t.status} = 'booked') = (${t.appointmentId} IS NOT NULL)`),
+  check("follow_up_closed_reason", sql`(${t.status} = 'closed') = (${t.closedReason} IS NOT NULL)`)]);
+
+export const waitlistStatus = pgEnum("waitlist_status", ["waiting", "booked", "left"]);
+
+// With an appointment, the patient wants that visit moved earlier. Without one, they want a first
+// time with this clinician. A patient waits once per clinician.
+export const waitlistEntries = pgTable("waitlist_entries", {
+  ...recordColumns(),
+  patientId: uuid("patient_id").notNull(),
+  providerId: uuid("provider_id").notNull(),
+  appointmentId: uuid("appointment_id"),
+  reason: text("reason").notNull(),
+  status: waitlistStatus("status").default("waiting").notNull(),
+}, (t) => [uniqueIndex("waitlist_entries_clinic_id_unique").on(t.clinicId, t.id),
+  uniqueIndex("waitlist_one_active").on(t.clinicId, t.patientId, t.providerId).where(sql`${t.status} = 'waiting' AND ${t.deletedAt} IS NULL`),
+  index("waitlist_queue").on(t.clinicId, t.providerId, t.status, t.createdAt), index("waitlist_appointment").on(t.appointmentId)]);
+
+// A freed time offered to someone waiting. The time is not held: an offer is live while the slot
+// is free and ahead, and active_slot_booking decides who gets it, so the first to accept wins.
+// Written by whichever request freed the slot, so created_by/updated_by do not apply.
+export const waitlistOffers = pgTable("waitlist_offers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  clinicId: uuid("clinic_id").notNull(),
+  entryId: uuid("entry_id").notNull(),
+  slotId: uuid("slot_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("waitlist_offer_once").on(t.entryId, t.slotId), index("waitlist_offer_report").on(t.clinicId, t.acceptedAt), index("waitlist_offer_slot").on(t.slotId)]);

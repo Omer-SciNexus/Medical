@@ -1,3 +1,17 @@
+# Care around the visit - 6 November 2026
+
+Follow-up plans, a waiting list and a patient's own access history. New screens: `/patient/access`, `/staff/follow-ups`. New tables, in migration 0017: `follow_ups`, `waitlist_entries`, `waitlist_offers`. No existing migration changed.
+
+- A follow-up is created in the visit's completion transaction. Its note is written for the patient, so it stays out of mail and off the front desk's list.
+- Waiting-list offers are created in the transaction that frees the time, so they need no worker. Times are not held: `active_slot_booking` decides who gets one, so the first to accept wins and the rest learn it has gone.
+- A patient's access history reads the audit log through the auditor credential. Screens listing many patients carry no patient id in the log, so they are not shown there, and the page says so.
+
+**Verified on this workstation, with Docker unavailable:** type check, lint and 123 unit tests pass. Against PostgreSQL 17.11 with the repository's Redis stand-in, the new `care-loop` suite (25 tests) and every other suite that can run there pass, except one `foundation` test the local harness cannot run because it refers to the test container. A browser walk through patient, clinician, front-desk and administrator accounts passed 16 of 16 checks.
+
+**Not verified here:** the `mail-queue`, `object-store` and `realtime` suites, the worker's real BullMQ path for the new jobs, and real mail delivery. The job handlers were run directly with a stubbed mail provider. Migration 0017 has been applied only to disposable databases.
+
+---
+
 # Reliability implementation ? 19 October 2026
 
 Local branch: `fix/clinic-workflow-reliability`. Changes have not been pushed or deployed. This section supersedes the older verification snapshot below.

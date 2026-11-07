@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, gt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, gt, sql } from "drizzle-orm";
 import { getDb, getAuditDb, type Transaction } from "@/platform/db";
 import { auditCheckpoints, auditLog, careRelationships, clinics, invitations, users } from "./schema";
 import type { Actor, AccessPurpose } from "./validators";
@@ -112,6 +112,21 @@ export async function listAuditEvents(clinicId: string, filters: AuditFilters) {
       filters.to ? lte(auditLog.createdAt, filters.to) : undefined,
       filters.before ? lt(auditLog.seq, filters.before) : undefined))
     .orderBy(desc(auditLog.seq)).limit(filters.limit);
+}
+/**
+ * What other people did with one patient's record. Read through the auditor credential, as every
+ * audit read is. The system (a null actor) and the patient's own account are not "someone else".
+ */
+export async function listRecordAccessEvents(clinicId: string, patientId: string, ownActorId: string, options: { before?: number; limit: number }) {
+  return getAuditDb().select({ seq: auditLog.seq, actorId: auditLog.actorId, action: auditLog.action, purpose: auditLog.purpose, outcome: auditLog.outcome, reason: auditLog.reason, createdAt: auditLog.createdAt })
+    .from(auditLog).where(and(eq(auditLog.clinicId, clinicId), eq(auditLog.patientId, patientId), isNotNull(auditLog.actorId), ne(auditLog.actorId, ownActorId),
+      options.before ? lt(auditLog.seq, options.before) : undefined))
+    .orderBy(desc(auditLog.seq)).limit(options.limit);
+}
+export async function listNamesOfUsers(clinicId: string, userIds: string[]) {
+  if (!userIds.length) return [];
+  return getDb().select({ id: users.id, displayName: users.displayName, role: users.role }).from(users)
+    .where(and(eq(users.clinicId, clinicId), inArray(users.id, userIds))).limit(userIds.length);
 }
 export async function verifyAuditChain() {
   const rows = await getAuditDb().execute<{ checked: string | number; broken_seq: string | number | null }>(sql`SELECT * FROM verify_audit_chain()`);

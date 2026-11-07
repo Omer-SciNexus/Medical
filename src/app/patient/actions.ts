@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { assertSameOrigin } from "@/modules/identity";
-import { advanceAppointment, bookAppointment, reschedulePatientAppointment } from "@/modules/scheduling";
+import { acceptWaitlistOffer, advanceAppointment, bookAppointment, joinWaitlist, leaveWaitlist, reschedulePatientAppointment } from "@/modules/scheduling";
 import { requireActor } from "@/app/session";
 import { toActionState } from "@/app/action-errors";
 import type { ActionState } from "@/lib/action-state";
@@ -30,6 +30,40 @@ export async function cancelAppointmentAction(_previous: ActionState, form: Form
     const actor = await requireActor(["patient"]);
     // The ordinary transition path: a patient may only ever move an appointment to cancelled.
     await advanceAppointment(actor, { appointmentId: String(form.get("appointmentId") ?? ""), revision: Number(form.get("revision") ?? 0), status: "cancelled" });
+  } catch (error) { return toActionState(error); }
+  revalidatePath(APPOINTMENTS);
+  return { ok: true };
+}
+/** A lost race still refreshes the page, so the offer that has gone disappears beside the message. */
+export async function acceptOfferAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["patient"]);
+    await acceptWaitlistOffer(actor, { offerId: String(form.get("offerId") ?? "") });
+  } catch (error) {
+    revalidatePath(APPOINTMENTS);
+    return toActionState(error);
+  }
+  revalidatePath(APPOINTMENTS);
+  return { ok: true, notice: "That time is yours. You can see it in your upcoming visits below." };
+}
+export async function joinWaitlistAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  const values = { reason: String(form.get("reason") ?? "") };
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["patient"]);
+    // A form joining from an appointment sends no reason: the visit already has one.
+    await joinWaitlist(actor, { providerId: String(form.get("providerId") ?? ""), reason: form.get("reason") === null ? undefined : values.reason,
+      appointmentId: form.get("appointmentId") === null ? undefined : String(form.get("appointmentId")) });
+  } catch (error) { return toActionState(error, values); }
+  revalidatePath(APPOINTMENTS);
+  return { ok: true };
+}
+export async function leaveWaitlistAction(_previous: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await assertSameOrigin();
+    const actor = await requireActor(["patient"]);
+    await leaveWaitlist(actor, { entryId: String(form.get("entryId") ?? "") });
   } catch (error) { return toActionState(error); }
   revalidatePath(APPOINTMENTS);
   return { ok: true };

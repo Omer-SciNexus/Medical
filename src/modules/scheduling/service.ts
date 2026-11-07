@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { getClinicSettings, recordScopedEvent, type Actor } from "@/modules/identity";
+import { getClinicSettings, listCareProviders, recordScopedEvent, type Actor } from "@/modules/identity";
 import { auditedPatientOperation, describeRequestClinic, describeRequestClinicByCode, digest, invitePatientPortal, listPortalLinks, newToken, PersonAdminError, recordSystemEvent } from "@/modules/identity";
 import { getDb, type Transaction } from "@/platform/db";
 import { getRedis } from "@/platform/redis";
@@ -12,6 +12,8 @@ import { appointmentRequestIdSchema, appointmentRequestSchema, declineAppointmen
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
 import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
+import { closeFollowUpSchema, followUpIdSchema, FollowUpError, joinWaitlistSchema, WaitlistError, waitlistEntryIdSchema, waitlistOfferIdSchema } from "./validators";
+import { acceptOffer, closeFollowUpRow, findFollowUp, insertFollowUp, insertWaitlistEntry, leaveWaitlistEntry, listFollowUpWorklist, listPatientFollowUps, listPatientWaitlist, requestFollowUpReminder, summariseWaitlist } from "./repository";
 import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
@@ -104,13 +106,16 @@ export async function getClinicReport(actor: Actor, input: unknown) {
   const start = from ?? addClinicDays(todayInZone(timeZone), -days);
   const end = addClinicDays(start, days);
   const window = { from: zonedStartOfDay(start, timeZone), to: zonedStartOfDay(end, timeZone) };
-  const [totals, providers, waits] = await Promise.all([
+  const [totals, providers, waits, waitlist] = await Promise.all([
     summariseClinicDays(actor.clinicId, window.from, window.to),
     summariseProviderUtilisation(actor.clinicId, window.from, window.to),
     waitDistribution(actor.clinicId, window.from, window.to),
+    // The other figures are finished days. This one runs through the last day shown, so a visit
+    // saved this morning counts this morning rather than tomorrow.
+    summariseWaitlist(actor.clinicId, window.from, zonedStartOfDay(addClinicDays(end, 1), timeZone)),
   ]);
   await recordScopedEvent(actor, { action: "scheduling.report_read", purpose: "administration", reason: `${start}:${days}` });
-  return { from: start, to: end, days, timeZone, totals, providers, waits };
+  return { from: start, to: end, days, timeZone, totals, providers, waits, waitlist };
 }
 function requireFrontDesk(actor: Actor) {
   if ((actor.role !== "staff" && actor.role !== "admin") || !actor.mfaVerified) throw new AccessScopeError();
@@ -343,6 +348,75 @@ export async function listMyAppointmentPage(actor: Actor, input: unknown) {
   const page = z.object({ view: z.enum(["upcoming", "past"]).default("upcoming"), number: z.coerce.number().int().min(1).max(10000).default(1) }).parse(input);
   const rows = await listPatientAppointments(actor, ownPatientId(actor), { ...page, at: new Date() });
   return { entries: rows.slice(0, 25), hasMore: rows.length > 25, ...page };
+}
+
+/**
+ * Consumed by the clinical completion transaction. Asking to see someone again is the clinician's
+ * decision about their own patient, so the visit's clinical authority is what covers it.
+ */
+export async function planFollowUpInTransaction(tx: Transaction, actor: Actor, input: { patientId: string; encounterId: string; dueOn: string; note?: string }) {
+  if (actor.role !== "clinician" || !actor.mfaVerified) throw new AccessScopeError();
+  const followUp = await insertFollowUp(tx, actor, input);
+  await recordScopedEvent(actor, { action: "scheduling.follow_up_planned", purpose: "clinical.write", patientId: input.patientId, resourceId: followUp.id }, tx);
+  return followUp;
+}
+export async function listMyFollowUps(actor: Actor) {
+  return listPatientFollowUps(actor, ownPatientId(actor));
+}
+/** Who the front desk needs to chase. Names across the clinic, so reading it is recorded. */
+export async function getFollowUpWorklist(actor: Actor) {
+  requireFrontDesk(actor);
+  const timeZone = (await getClinicSettings(actor))?.timezone ?? clinicTimezone();
+  const rows = await listFollowUpWorklist(actor.clinicId);
+  await recordScopedEvent(actor, { action: "scheduling.follow_ups_read", purpose: "scheduling", reason: `${rows.length}` });
+  return { today: todayInZone(timeZone), timeZone, followUps: rows };
+}
+export async function closeFollowUp(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { followUpId, reason } = closeFollowUpSchema.parse(input);
+  const closed = await closeFollowUpRow(actor, followUpId, reason);
+  if (!closed) throw new FollowUpError("This follow-up has already been booked or closed.");
+  await recordScopedEvent(actor, { action: "scheduling.follow_up_closed", purpose: "scheduling", patientId: closed.patientId, resourceId: followUpId, reason });
+}
+const REMIND_AGAIN_MS = 24 * 3_600_000;
+/** At most once a day: a person's inbox is not the place to work through a list. */
+export async function sendFollowUpReminderNow(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { followUpId } = followUpIdSchema.parse(input);
+  const followUp = await findFollowUp(actor.clinicId, followUpId);
+  if (!followUp || followUp.status !== "pending") throw new FollowUpError("This follow-up has already been booked or closed.");
+  if (followUp.remindedAt && Date.now() - followUp.remindedAt.getTime() < REMIND_AGAIN_MS) throw new FollowUpError("A reminder went out in the last 24 hours. Try again tomorrow.");
+  const timeZone = (await getClinicSettings(actor))?.timezone ?? clinicTimezone();
+  await requestFollowUpReminder(actor, followUpId, todayInZone(timeZone));
+  await recordScopedEvent(actor, { action: "scheduling.follow_up_reminder_requested", purpose: "scheduling", patientId: followUp.patientId, resourceId: followUpId });
+}
+
+/**
+ * Joining from an appointment asks for that visit to be moved earlier, and keeps its reason and
+ * clinician. Joining without one asks for a first time with this clinician.
+ */
+export async function joinWaitlist(actor: Actor, input: unknown) {
+  const request = joinWaitlistSchema.parse(input);
+  const patientId = ownPatientId(actor);
+  if (request.appointmentId) {
+    const appointment = await findAppointment(actor.clinicId, request.appointmentId);
+    if (!appointment || appointment.patientId !== patientId) throw new AccessScopeError();
+    if (appointment.status !== "booked") throw new WaitlistError("Only a visit that is still booked can be moved earlier.");
+    return insertWaitlistEntry(actor, patientId, { providerId: appointment.providerId, reason: appointment.reason, appointmentId: appointment.id });
+  }
+  if (!(await listCareProviders(actor)).some((provider) => provider.id === request.providerId)) throw new WaitlistError("That clinician is not taking bookings.");
+  return insertWaitlistEntry(actor, patientId, { providerId: request.providerId, reason: request.reason! });
+}
+export async function leaveWaitlist(actor: Actor, input: unknown) {
+  const { entryId } = waitlistEntryIdSchema.parse(input);
+  if (!await leaveWaitlistEntry(actor, ownPatientId(actor), entryId)) throw new WaitlistError("You are no longer on that waiting list.");
+}
+export async function listMyWaitlist(actor: Actor) {
+  return listPatientWaitlist(actor, ownPatientId(actor));
+}
+export async function acceptWaitlistOffer(actor: Actor, input: unknown) {
+  const { offerId } = waitlistOfferIdSchema.parse(input);
+  return acceptOffer(actor, ownPatientId(actor), offerId);
 }
 
 const REQUEST_CONFIRM_SECONDS = 24 * 60 * 60;

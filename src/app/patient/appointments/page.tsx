@@ -3,10 +3,11 @@ import Link from "next/link";
 import { ArrowRight, CalendarCheck, ChevronRight, Home, TriangleAlert } from "lucide-react";
 import { AppShell } from "@/components/app/shell";
 import { getClinicSettings, listCareProviders } from "@/modules/identity";
-import { listMyAppointmentOptions, listMyAppointmentPage } from "@/modules/scheduling";
-import { clinicTimezone } from "@/lib/clinic-day";
+import { listMyAppointmentOptions, listMyAppointmentPage, listMyFollowUps, listMyWaitlist } from "@/modules/scheduling";
+import { clinicTimezone, todayInZone } from "@/lib/clinic-day";
 import { requireActor } from "@/app/session";
 import { Appointments } from "./appointments";
+import { NextSteps } from "./next-steps";
 
 export const metadata: Metadata = { title: "Your appointments", robots: { index: false, follow: false } };
 
@@ -21,7 +22,12 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     <AppShell actor={actor} clinicName={clinicName} current="/patient/appointments" breadcrumb={breadcrumb} register="patient">{children}</AppShell>;
 
   try {
-    const [clinic, providers, result] = await Promise.all([getClinicSettings(actor), listCareProviders(actor), listMyAppointmentPage(actor, { view, number: page })]);
+    const [clinic, providers, result, followUps, waitlist] = await Promise.all([getClinicSettings(actor), listCareProviders(actor), listMyAppointmentPage(actor, { view, number: page }), listMyFollowUps(actor), listMyWaitlist(actor)]);
+    const nameOf = (providerId: string) => providers.find((provider) => provider.id === providerId)?.displayName ?? "Your clinician";
+    const today = todayInZone(timeZone);
+    const offerDay = new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "long", day: "numeric", month: "long" });
+    const offerTime = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    const dueDay = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" });
     const appointments = result.entries;
     const moving = appointments.find((appointment) => appointment.id === move && appointment.status === "booked") ?? null;
     // Only the appointment being moved needs its clinician's open times loaded.
@@ -36,8 +42,15 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
         <Link href="/patient/appointments" aria-current={view === "upcoming" ? "page" : undefined}>Upcoming</Link>
         <Link href="/patient/appointments?view=past" aria-current={view === "past" ? "page" : undefined}>Past and cancelled</Link>
       </nav>
+      <NextSteps
+        offers={waitlist.offers.map((offer) => ({ id: offer.id, providerName: nameOf(offer.providerId), day: offerDay.format(offer.startsAt), time: offerTime.format(offer.startsAt),
+          movesVisit: waitlist.entries.some((entry) => entry.id === offer.entryId && entry.appointmentId !== null) }))}
+        followUps={followUps.map((followUp) => ({ id: followUp.id, providerId: followUp.providerId, providerName: nameOf(followUp.providerId), due: dueDay.format(new Date(`${followUp.dueOn}T12:00:00Z`)), overdue: followUp.dueOn < today, note: followUp.note }))}
+        waiting={waitlist.entries.map((entry) => ({ id: entry.id, providerName: nameOf(entry.providerId), reason: entry.reason, movesVisit: entry.appointmentId !== null }))}
+      />
       <Appointments
         page={page} view={view}
+        waitlistedProviders={waitlist.entries.map((entry) => entry.providerId)}
         timeZone={timeZone}
         moving={moving ? { id: moving.id, revision: moving.revision, providerId: moving.providerId } : null}
         options={options.map((slot) => ({ id: slot.id, startsAt: slot.startsAt.toISOString(), endsAt: slot.endsAt.toISOString() }))}
