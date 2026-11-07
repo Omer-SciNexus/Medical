@@ -12,7 +12,8 @@ import { appointmentRequestIdSchema, appointmentRequestSchema, declineAppointmen
 import { availabilityQuerySchema, blackoutIdSchema, blackoutSchema, bookingSchema, extendScheduleSchema, patientCorrectionSchema, patientIdSchema, patientListSchema, patientRegistrationSchema, patientSearchSchema, PossibleDuplicateError, queryDaySchema, reportRangeSchema, rescheduleSchema, templateIdSchema, templateSchema, transitionSchema, PatientRegistrationError, ScheduleAuthoringError, SlotUnavailableError } from "./validators";
 import { canTransition, roleMayTransition, waitingMinutes } from "./policy";
 import { findPendingAppointmentRequest, insertAppointmentRequest, listPendingAppointmentRequests, settleAppointmentRequest } from "./repository";
-import { insertFollowUp, listFollowUpWorklist, listPatientFollowUps } from "./repository";
+import { closeFollowUpSchema, FollowUpError } from "./validators";
+import { closeFollowUpRow, insertFollowUp, listFollowUpWorklist, listPatientFollowUps } from "./repository";
 import { claimSlot, beginAppointment, completeAppointment, createBlackout, createTemplate, deleteBlackout, deleteTemplate, findAppointment, findNameAndBirthMatches, findPatientDetails, findPatientIdentity, listRegistrationsSince, updatePatientDetails, findSlot, hasImminentAppointment, highestMrnNumber, insertGeneratedSlots, moveAppointmentToSlot, insertPatient, listBlackouts, listOpenSlots, listPatientsPage, listPatientAppointments, listProviderQueue, listProviderSlots, listTemplates, listWaitingRoom, summariseClinicDays, summariseProviderUtilisation, waitDistribution, patientIsInClinic, searchPatientsByTerm, transitionAppointment } from "./repository";
 
 // Access-control handshake, not a patient-data endpoint. Calling assertCanAccessPatient
@@ -366,6 +367,13 @@ export async function getFollowUpWorklist(actor: Actor) {
   const rows = await listFollowUpWorklist(actor.clinicId);
   await recordScopedEvent(actor, { action: "scheduling.follow_ups_read", purpose: "scheduling", reason: `${rows.length}` });
   return { today: todayInZone(timeZone), timeZone, followUps: rows };
+}
+export async function closeFollowUp(actor: Actor, input: unknown) {
+  requireFrontDesk(actor);
+  const { followUpId, reason } = closeFollowUpSchema.parse(input);
+  const closed = await closeFollowUpRow(actor, followUpId, reason);
+  if (!closed) throw new FollowUpError("This follow-up has already been booked or closed.");
+  await recordScopedEvent(actor, { action: "scheduling.follow_up_closed", purpose: "scheduling", patientId: closed.patientId, resourceId: followUpId, reason });
 }
 
 const REQUEST_CONFIRM_SECONDS = 24 * 60 * 60;

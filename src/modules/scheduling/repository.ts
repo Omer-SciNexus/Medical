@@ -96,6 +96,12 @@ export async function listFollowUpWorklist(clinicId: string) {
     .where(and(eq(followUps.clinicId, clinicId), eq(followUps.status, "pending"), isNull(followUps.deletedAt), isNull(patients.deletedAt)))
     .orderBy(asc(followUps.dueOn), asc(followUps.id)).limit(100);
 }
+export async function closeFollowUpRow(actor: Actor, followUpId: string, reason: string) {
+  const [followUp] = await getDb().update(followUps).set({ status: "closed", closedReason: reason, updatedBy: actor.id })
+    .where(and(eq(followUps.id, followUpId), eq(followUps.clinicId, actor.clinicId), eq(followUps.status, "pending"), isNull(followUps.deletedAt)))
+    .returning({ id: followUps.id, patientId: followUps.patientId });
+  return followUp;
+}
 export async function listPatientAppointments(actor: Actor, patientId: string, page?: { view: "upcoming" | "past"; number: number; at: Date }) {
   const upcoming = sql`${availabilitySlots.startsAt} > ${page?.at.toISOString() ?? new Date().toISOString()}::timestamptz AND ${appointments.status} NOT IN ('cancelled', 'done', 'no_show')`;
   return getDb().transaction((tx) => auditedPatientOperation(tx, actor, patientId, "scheduling", "scheduling.appointments_read", () =>
